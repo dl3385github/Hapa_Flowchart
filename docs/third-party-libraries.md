@@ -11,7 +11,6 @@ The Hapa Flowchart application leverages several third-party libraries to provid
 | Library | Purpose | Version | License |
 |---------|---------|---------|---------|
 | [React](https://reactjs.org/) | Core UI framework | 18.2.0+ | MIT |
-| [Electron](https://www.electronjs.org/) | Desktop application wrapper | 25.0.0+ | MIT |
 | [Vite](https://vitejs.dev/) | Build tool and dev server | 4.3.0+ | MIT |
 | [TypeScript](https://www.typescriptlang.org/) | Type safety and developer experience | 5.0.0+ | Apache-2.0 |
 
@@ -104,7 +103,8 @@ The Hapa Flowchart application leverages several third-party libraries to provid
 | [ESLint](https://eslint.org/) | Code linting | 8.39.0+ | MIT |
 | [Prettier](https://prettier.io/) | Code formatting | 2.8.0+ | MIT |
 | [Husky](https://typicode.github.io/husky/) | Git hooks | 8.0.0+ | MIT |
-| [electron-builder](https://www.electron.build/) | Electron app packaging | 23.6.0+ | MIT |
+| [Workbox](https://developers.google.com/web/tools/workbox) | PWA service worker generation | 6.5.0+ | MIT |
+| [vite-plugin-pwa](https://github.com/antfu/vite-plugin-pwa) | PWA integration for Vite | 0.16.0+ | MIT |
 
 ## Implementation Details
 

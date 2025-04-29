@@ -6,7 +6,6 @@
 - **Styling:** Tailwind CSS with custom theme extensions
 - **Flowchart Library:** React Flow (for node-based diagrams)
 - **Build System:** Vite for fast development and optimized production builds
-- **Desktop Wrapper:** Electron for cross-platform desktop application
 - **State Management:** Redux Toolkit for global state, React Query for API data
 - **Real-time Communication:** WebRTC via simple-peer for P2P connections
 - **Local Storage:** IndexedDB for offline-first capability
@@ -73,42 +72,48 @@ src/
 ## Key Components
 
 ### Canvas Component
-The primary workspace where users create and edit flowcharts.
+
+The Canvas is the central component where users create and edit flowcharts:
 
 ```jsx
-// Canvas.jsx - Simplified example
-import React, { useCallback } from 'react';
-import ReactFlow, { Background, Controls } from 'react-flow-renderer';
+// Canvas.jsx
+import { useCallback } from 'react';
+import ReactFlow, { Background, Controls, MiniMap } from 'react-flow-renderer';
 import { useSelector, useDispatch } from 'react-redux';
-import { updateFlowchart } from '../redux/slices/flowchartSlice';
-import CustomNodeTypes from './NodeTypes';
-import CustomEdgeTypes from './EdgeTypes';
+import { updateNodePosition, addNode, connectNodes } from '../redux/slices/flowchartSlice';
+import CustomNode from './NodeTypes/CustomNode';
+import TaskNode from './NodeTypes/TaskNode';
+
+const nodeTypes = {
+  custom: CustomNode,
+  task: TaskNode,
+};
 
 const Canvas = () => {
-  const flowchartData = useSelector(state => state.flowchart.current);
   const dispatch = useDispatch();
-
-  const onNodesChange = useCallback(changes => {
-    dispatch(updateFlowchart({ nodes: changes, type: 'nodes' }));
+  const { nodes, edges, selectedNode } = useSelector((state) => state.flowchart);
+  
+  const onNodeDragStop = useCallback((event, node) => {
+    dispatch(updateNodePosition({ id: node.id, position: node.position }));
   }, [dispatch]);
-
-  const onEdgesChange = useCallback(changes => {
-    dispatch(updateFlowchart({ edges: changes, type: 'edges' }));
+  
+  const onConnect = useCallback((params) => {
+    dispatch(connectNodes(params));
   }, [dispatch]);
-
+  
   return (
-    <div className="w-full h-full">
+    <div className="h-full w-full">
       <ReactFlow
-        nodes={flowchartData.nodes}
-        edges={flowchartData.edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        nodeTypes={CustomNodeTypes}
-        edgeTypes={CustomEdgeTypes}
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodeDragStop={onNodeDragStop}
+        onConnect={onConnect}
         fitView
       >
         <Background />
         <Controls />
+        <MiniMap />
       </ReactFlow>
     </div>
   );
@@ -118,103 +123,121 @@ export default Canvas;
 ```
 
 ### TaskNode Component
-A specialized node that connects to Hapa Task Manager data.
+
+TaskNode integrates with the Hapa Task Manager to display and link tasks:
 
 ```jsx
-// TaskNode.jsx - Simplified example
-import React, { useEffect, useState } from 'react';
+// TaskNode.jsx
+import { memo } from 'react';
 import { Handle, Position } from 'react-flow-renderer';
-import { fetchTaskDetails } from '../services/taskManagerApi';
+import { useSelector, useDispatch } from 'react-redux';
+import { fetchTaskDetails } from '../../redux/slices/taskManagerSlice';
 
-const TaskNode = ({ data, id }) => {
-  const [taskDetails, setTaskDetails] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (data.taskId) {
-      setLoading(true);
-      fetchTaskDetails(data.taskId)
-        .then(details => setTaskDetails(details))
-        .catch(err => console.error('Failed to fetch task details:', err))
-        .finally(() => setLoading(false));
+const TaskNode = ({ id, data }) => {
+  const dispatch = useDispatch();
+  const taskDetails = useSelector((state) => 
+    state.taskManager.tasks.find(task => task.id === data.taskId)
+  );
+  
+  const handleClick = () => {
+    if (!taskDetails && data.taskId) {
+      dispatch(fetchTaskDetails(data.taskId));
     }
-  }, [data.taskId]);
-
+  };
+  
   return (
-    <div className="task-node border-2 p-4 rounded bg-white shadow-md">
+    <div className="px-4 py-2 shadow-md rounded-md bg-white border-2 border-blue-500" onClick={handleClick}>
       <Handle type="target" position={Position.Top} />
-      
-      <div className="task-node-header font-bold">{data.label}</div>
-      
-      {loading ? (
-        <div className="text-sm">Loading task details...</div>
-      ) : taskDetails ? (
-        <div className="task-details mt-2">
-          <div className="text-sm">Status: {taskDetails.status}</div>
-          <div className="text-sm">Assigned: {taskDetails.assignedTo.length} members</div>
-          <div className="text-sm">Deadline: {new Date(taskDetails.deadline).toLocaleDateString()}</div>
+      <div className="flex flex-col">
+        <div className="flex items-center">
+          <div className="ml-2">
+            <div className="text-lg font-bold">{data.label}</div>
+            {taskDetails && (
+              <div className="text-gray-500">
+                Status: {taskDetails.status}
+              </div>
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="text-sm text-gray-500">No task connected</div>
-      )}
-      
+      </div>
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
 };
 
-export default TaskNode;
+export default memo(TaskNode);
 ```
 
 ### CollaborationPanel Component
-Interface for real-time collaboration features.
+
+The CollaborationPanel facilitates real-time collaboration between users:
 
 ```jsx
-// CollaborationPanel.jsx - Simplified example
-import React from 'react';
-import { useSelector } from 'react-redux';
-import UserAvatar from '../core/UserAvatar';
-import { usePeerConnections } from '../hooks/usePeerConnection';
+// CollaborationPanel.jsx
+import { useEffect, useState } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import { 
+  updatePeerCursor, 
+  initializeConnection,
+  broadcastChange
+} from '../../redux/slices/collaborationSlice';
+import UserCursor from './UserCursor';
+import LiveIndicator from './LiveIndicator';
 
 const CollaborationPanel = () => {
-  const connectedPeers = useSelector(state => state.collaboration.peers);
-  const { sendMessage } = usePeerConnections();
-
+  const dispatch = useDispatch();
+  const { peers, connectionStatus, cursorPositions } = useSelector((state) => state.collaboration);
+  const { nodes, edges } = useSelector((state) => state.flowchart);
+  const [shareKey, setShareKey] = useState('');
+  
+  useEffect(() => {
+    // Set up event listener for cursor movement
+    const trackCursor = (e) => {
+      const position = { x: e.clientX, y: e.clientY };
+      dispatch(broadcastChange({ type: 'CURSOR_MOVE', payload: position }));
+    };
+    
+    document.addEventListener('mousemove', trackCursor);
+    return () => document.removeEventListener('mousemove', trackCursor);
+  }, [dispatch]);
+  
+  const handleConnect = () => {
+    dispatch(initializeConnection(shareKey));
+  };
+  
   return (
-    <div className="collaboration-panel bg-gray-100 p-4 rounded">
-      <h3 className="text-lg font-bold mb-4">Collaborators ({connectedPeers.length})</h3>
+    <div className="fixed right-0 top-20 bg-white p-4 shadow-lg rounded-l-lg">
+      <h3 className="font-bold text-lg mb-4">Collaboration</h3>
       
-      <div className="collaborators-list">
-        {connectedPeers.map(peer => (
-          <div key={peer.id} className="flex items-center mb-2">
-            <UserAvatar did={peer.did} size="sm" />
-            <span className="ml-2">{peer.name || peer.did.substring(0, 10)}</span>
-            <div className="ml-auto">
-              <span className={`h-3 w-3 rounded-full inline-block ${peer.active ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-            </div>
-          </div>
-        ))}
-      </div>
-      
-      <div className="share-section mt-4 pt-4 border-t">
-        <h4 className="font-medium mb-2">Share Flowchart</h4>
-        <div className="flex">
+      {connectionStatus === 'disconnected' ? (
+        <div>
           <input 
             type="text" 
-            value={useSelector(state => state.flowchart.currentId)} 
-            className="text-sm p-2 border rounded flex-grow" 
-            readOnly 
+            value={shareKey} 
+            onChange={(e) => setShareKey(e.target.value)}
+            placeholder="Enter share key"
+            className="p-2 border rounded mb-2 w-full"
           />
           <button 
-            className="ml-2 bg-blue-500 text-white p-2 rounded"
-            onClick={() => navigator.clipboard.writeText(
-              useSelector(state => state.flowchart.currentId)
-            )}
+            onClick={handleConnect}
+            className="bg-blue-500 text-white p-2 rounded w-full"
           >
-            Copy
+            Connect
           </button>
         </div>
-      </div>
+      ) : (
+        <>
+          <LiveIndicator status={connectionStatus} />
+          <div className="mt-2">
+            <p>Connected Peers: {peers.length}</p>
+            <div className="mt-2">
+              {Object.entries(cursorPositions).map(([peerId, position]) => (
+                <UserCursor key={peerId} position={position} peerId={peerId} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -222,282 +245,549 @@ const CollaborationPanel = () => {
 export default CollaborationPanel;
 ```
 
-## State Management
+## Redux Store
 
-### Redux Store Structure
+Redux Toolkit is used for global state management:
 
 ```js
-// Simplified store structure
-{
-  flowchart: {
-    current: {
-      id: "flow-123456",
-      nodes: [...],
-      edges: [...],
-      version: 12,
-      lastModified: "2023-06-15T14:32:10Z"
-    },
-    history: [...],   // Previous versions for undo/redo
-    saved: true,      // Indicates if changes have been saved
-    templates: [...]  // Available flowchart templates
+// store.js
+import { configureStore } from '@reduxjs/toolkit';
+import flowchartReducer from './slices/flowchartSlice';
+import collaborationReducer from './slices/collaborationSlice';
+import taskManagerReducer from './slices/taskManagerSlice';
+import userReducer from './slices/userSlice';
+
+export const store = configureStore({
+  reducer: {
+    flowchart: flowchartReducer,
+    collaboration: collaborationReducer,
+    taskManager: taskManagerReducer,
+    user: userReducer,
   },
-  tasks: {
-    items: [...],     // Task data from Hapa Task Manager
-    loading: false,
-    error: null
-  },
-  collaboration: {
-    peers: [...],     // Connected peers
-    cursors: {...},   // Current cursor positions
-    myId: "peer-xyz", // Local peer ID
-    connected: true,  // Connected to P2P network
-    swarmKey: "..."   // Current Hyperswarm key
-  },
-  ui: {
-    sidebar: {
-      open: true,
-      activeTab: "elements"
-    },
-    zoom: 1,
-    theme: "light"
+});
+
+export default store;
+```
+
+### Flowchart Slice
+
+```js
+// flowchartSlice.js
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { saveFlowchart, loadFlowchart } from '../../services/hypercoreService';
+
+export const saveFlowchartAsync = createAsyncThunk(
+  'flowchart/save',
+  async (_, { getState }) => {
+    const { nodes, edges } = getState().flowchart;
+    const result = await saveFlowchart({ nodes, edges });
+    return result;
   }
-}
-```
+);
 
-### Using React Query for Task Data
+export const loadFlowchartAsync = createAsyncThunk(
+  'flowchart/load',
+  async (flowchartId) => {
+    const result = await loadFlowchart(flowchartId);
+    return result;
+  }
+);
 
-```js
-// Example hook for fetching task data
-import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { fetchUserTasks, createTask, updateTask } from '../services/taskManagerApi';
-
-export function useTaskManager() {
-  const queryClient = useQueryClient();
-  
-  // Fetch tasks the user has access to
-  const tasksQuery = useQuery('user-tasks', fetchUserTasks, {
-    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
-    refetchOnWindowFocus: true,
-  });
-  
-  // Mutation for creating a new task
-  const createTaskMutation = useMutation(createTask, {
-    onSuccess: () => {
-      // Invalidate and refetch tasks after creation
-      queryClient.invalidateQueries('user-tasks');
+const flowchartSlice = createSlice({
+  name: 'flowchart',
+  initialState: {
+    nodes: [],
+    edges: [],
+    selectedNode: null,
+    flowchartId: null,
+    loading: false,
+    error: null,
+  },
+  reducers: {
+    addNode: (state, action) => {
+      state.nodes.push(action.payload);
     },
-  });
-  
-  // Mutation for updating an existing task
-  const updateTaskMutation = useMutation(updateTask, {
-    onSuccess: (data, variables) => {
-      // Optimistically update the task in the cache
-      queryClient.setQueryData('user-tasks', oldData => {
-        return oldData.map(task => 
-          task.id === variables.id ? { ...task, ...data } : task
-        );
+    updateNodePosition: (state, action) => {
+      const { id, position } = action.payload;
+      const node = state.nodes.find(n => n.id === id);
+      if (node) {
+        node.position = position;
+      }
+    },
+    connectNodes: (state, action) => {
+      const { source, target } = action.payload;
+      state.edges.push({
+        id: `${source}-${target}`,
+        source,
+        target,
       });
     },
-  });
-  
-  return {
-    tasks: tasksQuery.data || [],
-    isLoading: tasksQuery.isLoading,
-    error: tasksQuery.error,
-    createTask: createTaskMutation.mutate,
-    updateTask: updateTaskMutation.mutate,
-  };
-}
+    selectNode: (state, action) => {
+      state.selectedNode = action.payload;
+    },
+    // Additional reducers...
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(saveFlowchartAsync.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(saveFlowchartAsync.fulfilled, (state, action) => {
+        state.loading = false;
+        state.flowchartId = action.payload.id;
+      })
+      .addCase(saveFlowchartAsync.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message;
+      })
+      // Additional cases for loadFlowchartAsync...
+  },
+});
+
+export const { addNode, updateNodePosition, connectNodes, selectNode } = flowchartSlice.actions;
+export default flowchartSlice.reducer;
 ```
 
-## WebRTC P2P Integration
+## Local Services
 
-### Peer Connection Hook
+### WebRTC Service
 
 ```js
-// Simplified hook for WebRTC connections
-import { useEffect, useCallback } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+// webrtcService.js
 import Peer from 'simple-peer';
-import { 
-  addPeer, 
-  removePeer, 
-  updatePeerCursor,
-  setPeerId 
-} from '../redux/slices/collaborationSlice';
-import { applyRemoteChanges } from '../redux/slices/flowchartSlice';
 
-export function usePeerConnections() {
-  const dispatch = useDispatch();
-  const flowchartId = useSelector(state => state.flowchart.current.id);
-  const myPeerId = useSelector(state => state.collaboration.myId);
+class WebRTCService {
+  constructor() {
+    this.peers = {};
+    this.onConnectionCallback = null;
+    this.onDataCallback = null;
+    this.onCloseCallback = null;
+  }
   
-  // Initialize connection to Hyperswarm with flowchart ID
-  useEffect(() => {
-    if (!flowchartId) return;
-    
-    // Connect to hyperswarm with flowchart ID as topic
-    const swarmConnection = connectToHyperswarm(flowchartId);
-    
-    // When we discover a new peer
-    swarmConnection.on('peer', (peerInfo) => {
-      const peer = new Peer({ initiator: true });
-      
-      peer.on('signal', data => {
-        // Send our signal data to the peer via Hyperswarm
-        swarmConnection.sendTo(peerInfo.id, JSON.stringify({
-          type: 'signal',
-          sender: myPeerId,
-          data
-        }));
-      });
-      
-      peer.on('connect', () => {
-        dispatch(addPeer({
-          id: peerInfo.id,
-          did: peerInfo.did, // If available
-          connected: true
-        }));
-      });
-      
-      peer.on('data', data => {
-        const message = JSON.parse(data.toString());
-        
-        if (message.type === 'cursor') {
-          dispatch(updatePeerCursor({
-            peerId: peerInfo.id,
-            position: message.position
-          }));
-        } else if (message.type === 'flowchart-change') {
-          dispatch(applyRemoteChanges(message.changes));
-        }
-      });
-      
-      peer.on('close', () => {
-        dispatch(removePeer(peerInfo.id));
-      });
+  initializePeer(isInitiator, signalData = null) {
+    const peer = new Peer({
+      initiator: isInitiator,
+      trickle: false,
     });
     
-    return () => {
-      swarmConnection.destroy();
-    };
-  }, [flowchartId, myPeerId, dispatch]);
-  
-  // Function to send flowchart changes to all peers
-  const sendFlowchartChanges = useCallback((changes) => {
-    const peers = useSelector(state => state.collaboration.peers);
-    
-    peers.forEach(peer => {
-      if (peer.connection && peer.connected) {
-        peer.connection.send(JSON.stringify({
-          type: 'flowchart-change',
-          changes
-        }));
+    peer.on('signal', (data) => {
+      if (this.onSignalCallback) {
+        this.onSignalCallback(data);
       }
     });
+    
+    peer.on('connect', () => {
+      if (this.onConnectionCallback) {
+        this.onConnectionCallback(peer);
+      }
+    });
+    
+    peer.on('data', (data) => {
+      if (this.onDataCallback) {
+        this.onDataCallback(JSON.parse(data.toString()));
+      }
+    });
+    
+    peer.on('close', () => {
+      if (this.onCloseCallback) {
+        this.onCloseCallback();
+      }
+    });
+    
+    if (signalData) {
+      peer.signal(signalData);
+    }
+    
+    return peer;
+  }
+  
+  sendData(peerId, data) {
+    if (this.peers[peerId] && this.peers[peerId].connected) {
+      this.peers[peerId].send(JSON.stringify(data));
+      return true;
+    }
+    return false;
+  }
+  
+  broadcastData(data) {
+    Object.values(this.peers).forEach(peer => {
+      if (peer.connected) {
+        peer.send(JSON.stringify(data));
+      }
+    });
+  }
+  
+  // Event handlers setup
+  onSignal(callback) {
+    this.onSignalCallback = callback;
+  }
+  
+  onConnection(callback) {
+    this.onConnectionCallback = callback;
+  }
+  
+  onData(callback) {
+    this.onDataCallback = callback;
+  }
+  
+  onClose(callback) {
+    this.onCloseCallback = callback;
+  }
+  
+  // Cleanup
+  destroy() {
+    Object.values(this.peers).forEach(peer => peer.destroy());
+    this.peers = {};
+  }
+}
+
+export default new WebRTCService();
+```
+
+## Web-specific Optimizations
+
+### Progressive Web App Setup
+
+The application is configured as a Progressive Web App (PWA) to provide an app-like experience in the browser:
+
+```js
+// vite.config.js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
+      manifest: {
+        name: 'Hapa Flowchart',
+        short_name: 'Hapa Flow',
+        theme_color: '#ffffff',
+        icons: [
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable',
+          },
+        ],
+      },
+    }),
+  ],
+});
+```
+
+### Service Worker for Offline Support
+
+```js
+// src/serviceWorker.js
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { StaleWhileRevalidate, CacheFirst } from 'workbox-strategies';
+import { ExpirationPlugin } from 'workbox-expiration';
+
+// Precache all assets generated by your build process
+precacheAndRoute(self.__WB_MANIFEST);
+
+// Cache API responses
+registerRoute(
+  /^https:\/\/api\.hapaai\.com\/v1/,
+  new StaleWhileRevalidate({
+    cacheName: 'api-cache',
+  })
+);
+
+// Cache images with a Cache First strategy
+registerRoute(
+  /\.(?:png|jpg|jpeg|svg|gif)$/,
+  new CacheFirst({
+    cacheName: 'image-cache',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 60,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+      }),
+    ],
+  })
+);
+```
+
+### IndexedDB for Local Persistence
+
+```js
+// src/services/storageService.js
+import { openDB } from 'idb';
+
+const DB_NAME = 'hapa-flowchart-db';
+const DB_VERSION = 1;
+const FLOWCHART_STORE = 'flowcharts';
+const TASKS_STORE = 'tasks';
+
+async function initDB() {
+  return openDB(DB_NAME, DB_VERSION, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains(FLOWCHART_STORE)) {
+        db.createObjectStore(FLOWCHART_STORE, { keyPath: 'id' });
+      }
+      
+      if (!db.objectStoreNames.contains(TASKS_STORE)) {
+        db.createObjectStore(TASKS_STORE, { keyPath: 'id' });
+      }
+    },
+  });
+}
+
+export async function saveFlowchartToLocal(flowchart) {
+  const db = await initDB();
+  return db.put(FLOWCHART_STORE, flowchart);
+}
+
+export async function getFlowchartFromLocal(id) {
+  const db = await initDB();
+  return db.get(FLOWCHART_STORE, id);
+}
+
+export async function getAllFlowcharts() {
+  const db = await initDB();
+  return db.getAll(FLOWCHART_STORE);
+}
+
+export async function saveTaskToLocal(task) {
+  const db = await initDB();
+  return db.put(TASKS_STORE, task);
+}
+
+export async function getTaskFromLocal(id) {
+  const db = await initDB();
+  return db.get(TASKS_STORE, id);
+}
+
+export async function getAllTasks() {
+  const db = await initDB();
+  return db.getAll(TASKS_STORE);
+}
+```
+
+## Responsive Design
+
+The application is designed to be responsive across desktop and mobile browsers:
+
+```jsx
+// src/components/layout/Layout.jsx
+import { useState } from 'react';
+import Header from './Header';
+import Sidebar from './Sidebar';
+import Canvas from '../flowchart/Canvas';
+
+const Layout = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  
+  return (
+    <div className="h-screen flex flex-col">
+      <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar 
+          isOpen={sidebarOpen} 
+          className={`transition-all duration-300 ${
+            sidebarOpen ? 'w-64' : 'w-0'
+          } md:w-64`} 
+        />
+        <main className="flex-1 overflow-hidden">
+          <Canvas />
+        </main>
+      </div>
+    </div>
+  );
+};
+
+export default Layout;
+```
+
+## Theming and Accessibility
+
+### Theme Configuration
+
+```js
+// src/styles/theme.js
+const colors = {
+  primary: {
+    50: '#e6f7ff',
+    100: '#bae7ff',
+    // ...other shades
+    500: '#1890ff', // Main primary color
+    // ...other shades
+    900: '#003a8c',
+  },
+  // ...other color definitions
+};
+
+const fontSizes = {
+  xs: '0.75rem',
+  sm: '0.875rem',
+  md: '1rem',
+  lg: '1.125rem',
+  xl: '1.25rem',
+  '2xl': '1.5rem',
+  // ...other sizes
+};
+
+const theme = {
+  colors,
+  fontSizes,
+  // ...other theme values
+};
+
+export default theme;
+```
+
+### Accessibility Hooks
+
+```js
+// src/hooks/useA11y.js
+import { useEffect, useCallback } from 'react';
+
+export function useA11y() {
+  const handleKeyNavigation = useCallback((e) => {
+    // Implementation of keyboard navigation
+    // For example, arrow keys to navigate between nodes
   }, []);
   
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyNavigation);
+    return () => document.removeEventListener('keydown', handleKeyNavigation);
+  }, [handleKeyNavigation]);
+  
+  // Additional accessibility features
+  
   return {
-    sendFlowchartChanges,
-    // Other methods for P2P communication
+    // Exported accessibility utilities
   };
 }
 ```
 
-## Theming & Styling
-
-The application uses Tailwind CSS with a custom theme extension to maintain consistent styling that aligns with the Hapa ecosystem's visual identity.
+## Error Handling and Logging
 
 ```js
-// tailwind.config.js
-module.exports = {
-  theme: {
-    extend: {
-      colors: {
-        'hapa-primary': '#3B82F6',
-        'hapa-secondary': '#10B981',
-        'hapa-accent': '#8B5CF6',
-        'hapa-background': '#F9FAFB',
-        'hapa-surface': '#FFFFFF',
-        'hapa-error': '#EF4444',
-        'hapa-warning': '#F59E0B',
-        'hapa-success': '#10B981',
-      },
-      fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        mono: ['Fira Code', 'monospace'],
-      },
-      boxShadow: {
-        'node': '0 2px 5px rgba(0, 0, 0, 0.1)',
-        'node-selected': '0 0 0 2px #3B82F6, 0 2px 5px rgba(0, 0, 0, 0.1)',
-      },
-    },
-  },
-  variants: {
-    extend: {
-      opacity: ['disabled'],
-      cursor: ['disabled'],
-      backgroundColor: ['active'],
-    },
-  },
-  plugins: [],
-};
-```
+// src/utils/errorHandler.js
+import * as Sentry from '@sentry/browser';
 
-## Accessibility Considerations
+// Initialize error tracking (in production only)
+if (process.env.NODE_ENV === 'production') {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV,
+  });
+}
 
-- All interactive elements have appropriate ARIA labels
-- Keyboard navigation supported throughout the application
-- Color contrast ratios meet WCAG 2.1 AA standards
-- Screen reader announcements for important state changes
-- Focus management for modal dialogs and popovers
-- Responsive design principles for various device sizes
+export function logError(error, context = {}) {
+  console.error(error);
+  
+  if (process.env.NODE_ENV === 'production') {
+    Sentry.captureException(error, {
+      extra: context,
+    });
+  }
+}
 
-## Performance Optimizations
-
-- Canvas rendering optimization with React.memo and useMemo
-- Virtualization for large flowcharts (only render visible nodes)
-- Throttled updates for real-time cursor movements
-- Lazy loading of non-critical components
-- Service worker for offline capabilities and faster loading
-- IndexedDB for client-side storage of flowchart data
-- Compression of data sent over WebRTC connections
-
-## Internationalization (i18n)
-
-The application supports internationalization through react-i18next:
-
-```jsx
-// Example of i18n implementation
-import { useTranslation } from 'react-i18next';
-
-function Toolbar() {
-  const { t } = useTranslation();
+export function ErrorBoundary({ children }) {
+  if (process.env.NODE_ENV !== 'production') {
+    return children;
+  }
   
   return (
-    <div className="toolbar">
-      <button title={t('toolbar.add_node')}>+</button>
-      <button title={t('toolbar.delete')}>{t('toolbar.delete')}</button>
-      <button title={t('toolbar.undo')}>{t('toolbar.undo')}</button>
-      <button title={t('toolbar.redo')}>{t('toolbar.redo')}</button>
-    </div>
+    <Sentry.ErrorBoundary fallback={<p>An error has occurred</p>}>
+      {children}
+    </Sentry.ErrorBoundary>
   );
 }
 ```
 
-## Error Handling
-
-- Global error boundary to catch and log unexpected errors
-- Structured error handling for API calls with retry logic
-- Offline detection and automatic reconnection
-- Helpful error messages with suggested actions for users
-- Fallback UI components when data is unavailable
-
 ## Development Workflow
 
-1. Develop components in isolation using Storybook
-2. Write unit tests with Jest and React Testing Library
-3. Integration testing for critical user flows
-4. Use ESLint and Prettier for code quality
-5. Pre-commit hooks for formatting and linting
-6. CI/CD pipeline for automated testing and deployment 
+The application uses Vite for a modern, fast development workflow:
+
+1. **Development Mode**: `npm run dev` - Starts the development server with hot module replacement
+2. **Build**: `npm run build` - Creates optimized production build
+3. **Preview**: `npm run preview` - Locally preview production build
+4. **Test**: `npm run test` - Runs test suite using Vitest
+5. **Lint**: `npm run lint` - Runs ESLint to check code quality
+
+### Development Dependencies
+
+```json
+{
+  "devDependencies": {
+    "@testing-library/react": "^13.4.0",
+    "@types/react": "^18.0.28",
+    "@vitejs/plugin-react": "^3.1.0",
+    "autoprefixer": "^10.4.14",
+    "eslint": "^8.36.0",
+    "eslint-plugin-react": "^7.32.2",
+    "postcss": "^8.4.21",
+    "tailwindcss": "^3.2.7",
+    "vite": "^4.2.0",
+    "vite-plugin-pwa": "^0.14.4",
+    "vitest": "^0.29.7"
+  }
+}
+```
+
+## Internationalization
+
+The application supports multiple languages through i18next:
+
+```jsx
+// src/i18n.js
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+
+const resources = {
+  en: {
+    translation: {
+      // English translations
+      'app.title': 'Hapa Flowchart',
+      'canvas.addNode': 'Add Node',
+      // ...more translations
+    },
+  },
+  es: {
+    translation: {
+      // Spanish translations
+      'app.title': 'Diagrama de Flujo Hapa',
+      'canvas.addNode': 'Añadir Nodo',
+      // ...more translations
+    },
+  },
+  // ...other languages
+};
+
+i18n
+  .use(initReactI18next)
+  .init({
+    resources,
+    lng: 'en',
+    fallbackLng: 'en',
+    interpolation: {
+      escapeValue: false,
+    },
+  });
+
+export default i18n;
+```
+
+## Conclusion
+
+The Hapa Flowchart frontend is built as a modern web application focusing on responsive design, offline capabilities, and real-time collaboration. By leveraging the power of React, Redux, and WebRTC, the application provides a seamless, intuitive interface for creating and sharing flowcharts within the Hapa ecosystem. 

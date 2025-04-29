@@ -16,12 +16,13 @@ Hapa Flowchart is a decentralized, privacy-focused flowchart creation and collab
 
 ## Technology Stack
 
-- **Frontend**: React.js with Electron for desktop applications
+- **Frontend**: React.js with Vite for fast development and optimized production builds
 - **Flowchart Engine**: React Flow library for node-based diagrams
 - **State Management**: Redux Toolkit + React Query
 - **P2P Connectivity**: WebRTC via simple-peer library
 - **Storage**: Hypercore Protocol for distributed storage
 - **AI Features**: Local Llama.cpp for suggestion generation
+- **Progressive Web App**: Service workers for offline capability and improved performance
 
 ## Documentation Index
 
@@ -64,8 +65,8 @@ The Hapa Flowchart will be developed in phases:
 │                      Hapa Flowchart App                          │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐    │
-│  │  Frontend    │  │ Local Node.js │  │    Hypercore       │    │
-│  │  React App   ├──┤    Server    ├──┤  (Local Storage)    │    │
+│  │  Frontend    │  │ Local Service │  │    Hypercore       │    │
+│  │  React App   ├──┤   Workers    ├──┤  (Local Storage)    │    │
 │  └──────┬───────┘  └──────┬───────┘  └─────────┬───────────┘    │
 │         │                 │                    │                 │
 │         └─────────────────┼────────────────────┘                 │
@@ -90,23 +91,22 @@ The Hapa Flowchart will be developed in phases:
 2. Install dependencies:
    ```
    npm install
-   npm run install:platform  # For platform-specific dependencies
    ```
 3. Start the development server:
    ```
    npm run dev
    ```
-4. For Electron development:
+4. Build for production:
    ```
-   npm run electron:dev
+   npm run build
    ```
 
 ### For Users
 
-1. Download the installer for your platform
-2. Install and launch the application
-3. Create a new flowchart or connect to Hapa Task Manager
-4. (Optional) Set up P2P collaboration by sharing your flowchart key
+1. Navigate to the Hapa Flowchart web application
+2. Create a new flowchart or connect to Hapa Task Manager
+3. (Optional) Set up P2P collaboration by sharing your flowchart key
+4. (Optional) Install as a Progressive Web App for offline use
 
 ## Contributing
 
