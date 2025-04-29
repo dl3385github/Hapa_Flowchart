@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-medium;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-700 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-600;
+  }
+}
+
+@layer components {
+  /* Button variants */
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+  }
+  
+  .btn-primary {
+    @apply btn bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500;
+  }
+  
+  .btn-secondary {
+    @apply btn bg-white border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  
+  .btn-danger {
+    @apply btn bg-red-600 hover:bg-red-700 text-white focus:ring-red-500;
+  }
+  
+  /* Form elements */
+  .form-input {
+    @apply block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white;
+  }
+  
+  .form-label {
+    @apply block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1;
+  }
+  
+  .form-group {
+    @apply mb-4;
+  }
+  
+  /* Cards */
+  .card {
+    @apply bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden;
+  }
+  
+  .card-header {
+    @apply px-6 py-4 border-b border-gray-200 dark:border-gray-700;
+  }
+  
+  .card-body {
+    @apply p-6;
+  }
+  
+  .card-footer {
+    @apply px-6 py-4 border-t border-gray-200 dark:border-gray-700;
+  }
+  
+  /* Table */
+  .table {
+    @apply min-w-full divide-y divide-gray-200 dark:divide-gray-700;
+  }
+  
+  .table th {
+    @apply px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider;
+  }
+  
+  .table td {
+    @apply px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400;
+  }
+  
+  /* ReactFlow customizations */
+  .react-flow__node {
+    @apply shadow-md;
+  }
+  
+  .react-flow__node-taskNode {
+    @apply rounded-md border-2 border-blue-500 bg-blue-50 dark:bg-blue-900 dark:bg-opacity-20;
+  }
+  
+  .react-flow__node-processNode {
+    @apply rounded-md border-2 border-gray-500 bg-gray-50 dark:bg-gray-800;
+  }
+  
+  .react-flow__node-decisionNode {
+    @apply border-2 border-yellow-500 bg-yellow-50 dark:bg-yellow-900 dark:bg-opacity-20;
+  }
+  
+  .react-flow__node-startEndNode {
+    @apply rounded-full border-2 border-green-500 bg-green-50 dark:bg-green-900 dark:bg-opacity-20;
+  }
+  
+  .react-flow__node-dataNode {
+    @apply border-2 border-purple-500 bg-purple-50 dark:bg-purple-900 dark:bg-opacity-20;
+  }
+  
+  .react-flow__handle {
+    @apply bg-blue-500 border-2 border-white dark:border-gray-800;
+  }
+  
+  .react-flow__edge-path {
+    @apply stroke-2;
+  }
+  
+  .react-flow__controls-button {
+    @apply bg-white dark:bg-gray-700 dark:border-gray-600 dark:hover:bg-gray-600;
+  }
+  
+  .react-flow__panel {
+    @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-md rounded-md p-2;
+  }
+}
+
+@layer utilities {
+  .transition-fast {
+    @apply transition duration-150 ease-in-out;
+  }
+  
+  .transition-normal {
+    @apply transition duration-300 ease-in-out;
+  }
+  
+  .transition-slow {
+    @apply transition duration-500 ease-in-out;
+  }
+} 

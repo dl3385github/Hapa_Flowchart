@@ -1,34 +1,28 @@
 # Hapa Flowchart
 
-A decentralized, privacy-focused flowchart creation and collaboration tool integrated with the Hapa ecosystem.
-
-![Hapa Flowchart](https://via.placeholder.com/800x400?text=Hapa+Flowchart)
+A decentralized, privacy-focused tool for creating and collaborating on flowcharts, integrated with the Hapa ecosystem.
 
 ## Overview
 
-Hapa Flowchart is a standalone application that enables users to create, edit, and share flowcharts in a peer-to-peer environment. It integrates with Hapa Task Manager to provide a seamless workflow for visualizing and planning tasks. With its emphasis on privacy, decentralization, and collaboration, Hapa Flowchart aligns with the core principles of the Hapa ecosystem.
+Hapa Flowchart is a powerful, intuitive flowchart creation tool built with privacy and decentralization at its core. It leverages the Hypercore Protocol for distributed data storage and WebRTC for real-time peer-to-peer collaboration, allowing users to work together without relying on centralized servers.
 
 ## Key Features
 
-- **Intuitive Flowchart Creation**: Drag-and-drop interface for building flowcharts
-- **P2P Collaboration**: Work together in real-time without centralized servers
-- **Hapa Task Manager Integration**: Link flowchart nodes to tasks for comprehensive project visualization
-- **Versioned History**: Track all changes with complete audit trail
-- **Privacy-First**: Local AI processing via Gatekeeper with no data leaving your device
-- **Decentralized Storage**: Powered by Hypercore Protocol for distributed, secure storage
-- **Offline-First**: Full functionality even without internet connectivity
+- **Intuitive Flowchart Creation**: Create professional flowcharts with a drag-and-drop interface
+- **P2P Collaboration**: Work with others in real-time using WebRTC and conflict-free replicated data types
+- **Integration with Hapa Task Manager**: Connect flowchart nodes directly to tasks in the Hapa ecosystem
+- **Versioned History**: Track changes and revert to previous versions of your flowcharts
+- **Privacy-First Approach**: End-to-end encryption ensures your data remains private
+- **Decentralized Storage**: Powered by Hypercore Protocol for resilient, distributed data storage
+- **Offline Functionality**: Create and edit flowcharts even without an internet connection
 
 ## Documentation
 
-For comprehensive documentation, please refer to the [docs folder](docs/README.md).
-
 - [Product Requirements](docs/product-requirements.md)
-- [Frontend Documentation](docs/frontend-documentation.md)
+- [Frontend Documentation](docs/frontend.md)
 - [Backend Specifications](docs/backend-specifications.md)
 - [API Specifications](docs/api-specifications.md)
-- [Database Schema](docs/database-schema.md)
 - [User Flow](docs/user-flow.md)
-- [Third-Party Libraries](docs/third-party-libraries.md)
 
 ## Getting Started
 
@@ -39,50 +33,50 @@ For comprehensive documentation, please refer to the [docs folder](docs/README.m
 
 ### Installation
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/hapanetwork/hapa-flowchart.git
+1. Clone the repository
+   ```bash
+   git clone https://github.com/hapaorg/hapa-flowchart.git
    cd hapa-flowchart
    ```
 
-2. Install dependencies:
-   ```
+2. Install dependencies
+   ```bash
    npm install
    ```
 
-3. (Optional) Install platform-specific dependencies:
-   ```
-   npm run install:platform
-   ```
-
-4. Start the development server:
-   ```
+3. Start the development server
+   ```bash
    npm run dev
    ```
 
-5. For Electron development:
-   ```
-   npm run electron:dev
-   ```
-
-### Building for Production
-
-```
-npm run build
-npm run electron:build
-```
+4. Open your browser to `http://localhost:5173`
 
 ## Usage
 
-1. **Create a new flowchart**: Start from scratch or use a template
-2. **Edit flowchart**: Add nodes, connections, and customize properties
-3. **Connect to Hapa Task Manager**: Link nodes to specific tasks
-4. **Collaborate**: Share your flowchart via Hypercore key or through Task Manager
-5. **Export/Import**: Save your work in various formats (JSON, SVG, PNG)
+### Creating a Flowchart
+
+1. Navigate to the Dashboard
+2. Click "New Flowchart"
+3. Give your flowchart a name and description
+4. Drag nodes from the sidebar onto the canvas
+5. Connect nodes by dragging from one node's handle to another
+6. Edit node properties by selecting a node and using the property panel
+
+### Collaborating
+
+1. Open a flowchart
+2. Click the "Share" button in the toolbar
+3. Copy the Hypercore key and share it with collaborators
+4. Collaborators can paste the key to join your session
+
+### Exporting/Importing
+
+1. Use the toolbar to export your flowchart in various formats (SVG, PNG, JSON)
+2. Import existing flowcharts by uploading JSON files or connecting to a shared Hypercore key
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
 
 ## License
 
@@ -90,7 +84,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- Hapa Network for the ecosystem infrastructure
-- Hypercore Protocol for the distributed storage technology
-- React Flow for the flowchart visualization foundation
-- All contributors and community members 
+- ReactFlow for the core flowchart visualization
+- Hypercore Protocol for decentralized data storage
+- Hapa Task Manager for integration capabilities 
