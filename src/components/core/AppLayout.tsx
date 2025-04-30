@@ -32,7 +32,7 @@ const AppLayout: React.FC = () => {
         />
         
         <main className="flex-1 overflow-auto p-4 bg-gray-50 dark:bg-gray-900">
-          <div className="container mx-auto">
+          <div className="container mx-auto h-full">
             <Outlet />
           </div>
         </main>

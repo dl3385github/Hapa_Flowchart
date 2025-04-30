@@ -4,14 +4,19 @@ import { Handle, Position, NodeProps } from 'reactflow';
 const ProcessNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) => {
   return (
     <div 
-      className={`px-4 py-2 min-w-[150px] min-h-[60px] flex flex-col justify-center transition-all ${
-        selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
-      }`}
+      className={`px-4 py-2 min-w-[150px] min-h-[60px] flex flex-col justify-center transition-all 
+        bg-white border-2 border-blue-500 shadow-lg rounded-md
+        dark:bg-gray-800 dark:border-blue-400
+        ${selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''}`}
+      style={{ 
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)', 
+        fontSize: '14px' 
+      }}
     >
       <Handle
         type="target"
         position={Position.Top}
-        style={{ background: '#555' }}
+        style={{ background: '#3B82F6', width: '12px', height: '12px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -27,7 +32,7 @@ const ProcessNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) => 
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: '#555' }}
+        style={{ background: '#3B82F6', width: '12px', height: '12px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -36,7 +41,7 @@ const ProcessNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) => 
         type="source"
         position={Position.Right}
         id="right"
-        style={{ background: '#555', top: '50%' }}
+        style={{ background: '#3B82F6', width: '12px', height: '12px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -44,7 +49,7 @@ const ProcessNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) => 
         type="source"
         position={Position.Left}
         id="left"
-        style={{ background: '#555', top: '50%' }}
+        style={{ background: '#3B82F6', width: '12px', height: '12px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
     </div>
