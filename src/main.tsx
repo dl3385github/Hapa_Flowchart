@@ -9,6 +9,9 @@ import App from './App';
 import { store } from './store';
 import './styles/index.css';
 
+// Import services for initialization
+import './services';
+
 // Initialize Sentry for error tracking in production only
 if (import.meta.env.PROD) {
   Sentry.init({

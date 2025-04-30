@@ -3,6 +3,7 @@ import { UIState } from '../../types';
 
 const initialState: UIState = {
   sidebarOpen: true,
+  sidebarMinimized: false,
   propertyPanelOpen: false,
   activePanel: null,
   selectedElements: {
@@ -21,6 +22,14 @@ export const uiSlice = createSlice({
     
     setSidebarOpen: (state, action: PayloadAction<boolean>) => {
       state.sidebarOpen = action.payload;
+    },
+    
+    toggleSidebarMinimized: (state) => {
+      state.sidebarMinimized = !state.sidebarMinimized;
+    },
+    
+    setSidebarMinimized: (state, action: PayloadAction<boolean>) => {
+      state.sidebarMinimized = action.payload;
     },
     
     togglePropertyPanel: (state) => {
@@ -51,6 +60,8 @@ export const uiSlice = createSlice({
 export const {
   toggleSidebar,
   setSidebarOpen,
+  toggleSidebarMinimized,
+  setSidebarMinimized,
   togglePropertyPanel,
   setPropertyPanelOpen,
   setActivePanel,

@@ -32,7 +32,6 @@ import PropertyPanel from '../components/flow/controls/PropertyPanel';
 import FlowToolbar from '../components/flow/controls/FlowToolbar';
 
 // Node types
-import TaskNode from '../components/flow/nodes/TaskNode';
 import ProcessNode from '../components/flow/nodes/ProcessNode';
 import DecisionNode from '../components/flow/nodes/DecisionNode';
 import StartEndNode from '../components/flow/nodes/StartEndNode';
@@ -45,7 +44,6 @@ import ConditionalEdge from '../components/flow/edges/ConditionalEdge';
 
 // Define custom node and edge types
 const nodeTypes = {
-  taskNode: TaskNode,
   processNode: ProcessNode,
   decisionNode: DecisionNode,
   startEndNode: StartEndNode,
@@ -386,16 +384,6 @@ const FlowchartEditor: React.FC = () => {
             
             <Panel position="top-right">
               {t('flowchart')}: {activeFlowchart.name}
-            </Panel>
-            
-            {/* Add debug panel with test button */}
-            <Panel position="top-left" className="bg-white p-2 rounded shadow">
-              <button 
-                onClick={addDebugNode}
-                className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Add Debug Node
-              </button>
             </Panel>
           </ReactFlow>
         </div>

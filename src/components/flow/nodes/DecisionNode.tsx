@@ -5,9 +5,12 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
   return (
     <div className="diamond-container">
       <div
-        className={`diamond min-w-[120px] min-h-[120px] flex items-center justify-center transition-all ${
-          selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
+        className={`diamond min-w-[120px] min-h-[120px] flex items-center justify-center transition-all 
+          bg-yellow-100 border-2 border-yellow-500 
+          dark:bg-yellow-800 dark:border-yellow-400
+          ${selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
         }`}
+        style={{ boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' }}
       >
         <div className="text-center p-2">
           <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">{data.label}</div>
@@ -18,7 +21,7 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
       <Handle
         type="target"
         position={Position.Top}
-        style={{ background: '#555' }}
+        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -26,7 +29,7 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Right}
         id="right"
-        style={{ background: '#555' }}
+        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -34,7 +37,7 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Bottom}
         id="bottom"
-        style={{ background: '#555' }}
+        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       
@@ -42,7 +45,7 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Left}
         id="left"
-        style={{ background: '#555' }}
+        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
         isConnectable={isConnectable}
       />
       

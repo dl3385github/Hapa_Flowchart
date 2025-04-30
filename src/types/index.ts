@@ -103,6 +103,7 @@ export interface AppSettings {
 // UI state
 export interface UIState {
   sidebarOpen: boolean;
+  sidebarMinimized: boolean;
   propertyPanelOpen: boolean;
   activePanel: string | null;
   selectedElements: {

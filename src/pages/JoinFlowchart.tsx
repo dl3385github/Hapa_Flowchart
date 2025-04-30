@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { HiOutlineArrowLeft, HiOutlineKey } from 'react-icons/hi';
 import { setActiveFlowchartKey } from '../store/slices/collaborationSlice';
+import webRTCService from '../services/WebRTCService';
+import { RootState } from '../store';
 
 const JoinFlowchart: React.FC = () => {
   const { t } = useTranslation();
@@ -13,6 +15,36 @@ const JoinFlowchart: React.FC = () => {
   const [hypercoreKey, setHypercoreKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { signalingError } = useSelector((state: RootState) => state.collaboration);
+  
+  // Initialize WebRTC service
+  useEffect(() => {
+    const initService = async () => {
+      try {
+        await webRTCService.initialize();
+      } catch (err) {
+        console.error('Failed to initialize WebRTC service:', err);
+        setError(t('webrtc_initialization_failed'));
+      }
+    };
+    
+    initService();
+    
+    // Cleanup on unmount
+    return () => {
+      if (isLoading) {
+        webRTCService.cleanup();
+      }
+    };
+  }, [t]);
+  
+  // Update error from Redux state
+  useEffect(() => {
+    if (signalingError) {
+      setError(signalingError);
+      setIsLoading(false);
+    }
+  }, [signalingError]);
   
   const handleJoin = async () => {
     if (!hypercoreKey.trim()) {
@@ -24,21 +56,21 @@ const JoinFlowchart: React.FC = () => {
     setError(null);
     
     try {
-      // In a real implementation, we would validate the key and connect to the Hypercore network
-      // For now, we'll just simulate it with a timeout
+      // Attempt to join the flowchart using WebRTC service
+      const success = await webRTCService.joinSharedFlowchart(hypercoreKey);
       
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Set the active flowchart key in collaboration state
-      dispatch(setActiveFlowchartKey(hypercoreKey));
-      
-      // Navigate to the editor page with a temporary ID
-      // In a real implementation, we would load the actual flowchart data
-      navigate(`/editor/shared-${hypercoreKey.substring(0, 8)}`);
-    } catch (err) {
-      setError(t('connection_failed'));
+      if (success) {
+        // Set the active flowchart key in collaboration state
+        dispatch(setActiveFlowchartKey(hypercoreKey));
+        
+        // Navigate to the editor page with a temporary ID
+        navigate(`/editor/shared-${hypercoreKey.substring(0, 8)}`);
+      } else {
+        setError(t('connection_failed'));
+      }
+    } catch (err: any) {
+      setError(err.message || t('connection_failed'));
       console.error('Failed to join flowchart:', err);
-    } finally {
       setIsLoading(false);
     }
   };

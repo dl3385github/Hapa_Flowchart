@@ -5,18 +5,33 @@ const StartEndNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
   const isStart = data.nodeType === 'start';
   const isEnd = data.nodeType === 'end';
   
+  const bgColor = isStart ? 'bg-green-100 dark:bg-green-800' : 
+                isEnd ? 'bg-red-100 dark:bg-red-800' : 
+                'bg-gray-100 dark:bg-gray-700';
+                
+  const borderColor = isStart ? 'border-green-500 dark:border-green-400' : 
+                   isEnd ? 'border-red-500 dark:border-red-400' : 
+                   'border-gray-500 dark:border-gray-400';
+  
   return (
     <div 
-      className={`px-4 py-2 min-w-[100px] min-h-[50px] flex flex-col justify-center transition-all ${
-        selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
+      className={`px-4 py-2 min-w-[100px] min-h-[50px] flex flex-col justify-center transition-all rounded-full
+        ${bgColor} border-2 ${borderColor} shadow-md
+        ${selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
       }`}
+      style={{ boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' }}
     >
       {/* Only add top handle for end node */}
       {!isStart && (
         <Handle
           type="target"
           position={Position.Top}
-          style={{ background: isEnd ? '#ef4444' : '#10b981' }}
+          style={{ 
+            background: isEnd ? '#ef4444' : '#10b981', 
+            width: '10px', 
+            height: '10px', 
+            border: '2px solid white'
+          }}
           isConnectable={isConnectable}
         />
       )}
@@ -36,7 +51,12 @@ const StartEndNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         <Handle
           type="source"
           position={Position.Bottom}
-          style={{ background: isStart ? '#10b981' : '#ef4444' }}
+          style={{ 
+            background: isStart ? '#10b981' : '#ef4444', 
+            width: '10px', 
+            height: '10px', 
+            border: '2px solid white'
+          }}
           isConnectable={isConnectable}
         />
       )}
