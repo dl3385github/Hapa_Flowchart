@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -19,6 +19,7 @@ import { toggleSidebar, togglePropertyPanel } from '../../../store/slices/uiSlic
 import { applyChanges } from '../../../store/slices/flowchartsSlice';
 import { FlowChanges } from '../../../types';
 import CollaboratorsList from './CollaboratorsList';
+import webRTCService from '../../../services/WebRTCService';
 
 interface FlowToolbarProps {
   flowchartId: string;
@@ -37,9 +38,17 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     state.ui.selectedElements
   );
   
+  const isConnected = useSelector((state: RootState) => 
+    state.collaboration.isConnected
+  );
+  
   const hasSelection = selectedElements.nodes.length > 0 || selectedElements.edges.length > 0;
   const [sharingModalOpen, setSharingModalOpen] = useState(false);
   const [collaboratorsListOpen, setCollaboratorsListOpen] = useState(false);
+  const [flowchartKey, setFlowchartKey] = useState<string | null>(null);
+  
+  // Check if this is a shared flowchart (ID starts with 'shared-')
+  const isSharedFlowchart = flowchartId.startsWith('shared-');
   
   // Actions
   const handleGoBack = () => {
@@ -86,8 +95,16 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     alert(`Flowchart "${flowchart?.name}" saved!`);
   };
   
-  const handleShare = () => {
-    setSharingModalOpen(true);
+  const handleShare = async () => {
+    // Generate or retrieve the flowchart key
+    try {
+      const key = await webRTCService.createSharedFlowchart(flowchartId);
+      setFlowchartKey(key);
+      setSharingModalOpen(true);
+    } catch (error) {
+      console.error('Failed to generate sharing key:', error);
+      alert(t('failed_to_generate_key'));
+    }
   };
   
   const handleToggleCollaborators = () => {
@@ -208,14 +225,16 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
               <div className="flex">
                 <input
                   type="text"
-                  value="abc123def456ghi789jkl012mno345pqr678stu9"
+                  value={flowchartKey || ''}
                   readOnly
                   className="form-input rounded-r-none"
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText('abc123def456ghi789jkl012mno345pqr678stu9');
-                    alert(t('copied_to_clipboard'));
+                    if (flowchartKey) {
+                      navigator.clipboard.writeText(flowchartKey);
+                      alert(t('copied_to_clipboard'));
+                    }
                   }}
                   className="px-3 bg-gray-100 dark:bg-gray-700 border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-md text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
                 >
@@ -232,16 +251,16 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
                 {t('p2p_status')}
               </label>
               <div className="flex items-center">
-                <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
+                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'} mr-2`}></div>
                 <span className="text-sm text-gray-600 dark:text-gray-300">
-                  {t('ready_for_collaboration')}
+                  {isConnected ? t('ready_for_collaboration') : t('waiting_for_peers')}
                 </span>
                 <button
                   onClick={() => {}}
                   className="ml-auto p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                   title={t('refresh')}
                 >
-                  <HiOutlineRefresh className="h-4 w-4" />
+                  <HiOutlineRefresh className="h-4 w-5" />
                 </button>
               </div>
             </div>

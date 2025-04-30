@@ -74,6 +74,9 @@ const FlowchartEditor: React.FC = () => {
   const { propertyPanelOpen } = useSelector((state: RootState) => state.ui);
   const { isConnected, activeFlowchartKey } = useSelector((state: RootState) => state.collaboration);
   
+  // Track if this is a shared flowchart
+  const isSharedFlowchart = id?.startsWith('shared-');
+  
   // Local ReactFlow state
   const [nodes, setNodes, onNodesChange] = useNodesState(activeFlowchart?.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeFlowchart?.edges || []);
@@ -121,7 +124,7 @@ const FlowchartEditor: React.FC = () => {
         yjsService.cleanup();
       }
     };
-  }, [id, activeFlowchartKey]);
+  }, [id, activeFlowchartKey, setNodes, setEdges]);
   
   // Update local nodes/edges when flowchart changes
   useEffect(() => {

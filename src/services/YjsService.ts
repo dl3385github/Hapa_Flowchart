@@ -61,16 +61,19 @@ class YjsService {
       this.edgesData = this.ydoc.getArray('edges');
 
       // Set up the WebRTC provider for real-time collaboration
+      // Use the documentId as the room name to ensure unique rooms for each flowchart
+      const roomName = `hapa-flowchart-${documentId}`;
       const webrtcOptions: YjsProviderOptions = {
         signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
-        password: null,
+        password: null, // Consider using a derived password for better security
         awareness: null,
         maxConns: 20,
         filterBcConns: true,
         peerOpts: {}
       };
 
-      this.provider = new WebrtcProvider(documentId, this.ydoc, webrtcOptions as any);
+      console.log(`Initializing WebRTC provider with room: ${roomName}`);
+      this.provider = new WebrtcProvider(roomName, this.ydoc, webrtcOptions as any);
       this.awareness = this.provider.awareness;
 
       // Set up local awareness (cursor position, user info)
@@ -85,7 +88,7 @@ class YjsService {
       });
 
       // Set up persistence with IndexedDB
-      this.indexeddbProvider = new IndexeddbPersistence(documentId, this.ydoc);
+      this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
 
       // Subscribe to changes
       this.subscribeToChanges();

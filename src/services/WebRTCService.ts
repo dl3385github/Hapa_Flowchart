@@ -20,6 +20,8 @@ class WebRTCService {
   private localPeerId: string | null = null;
   private hypercoreKey: string | null = null;
   private signalingServer: WebSocket | null = null;
+  // Map to store flowchart IDs and their corresponding Hyperswarm keys
+  private flowchartKeys: Map<string, string> = new Map();
   
   // Initialize the service
   public async initialize(): Promise<string> {
@@ -58,10 +60,19 @@ class WebRTCService {
   }
   
   // Create and share a flowchart
-  public async createSharedFlowchart(): Promise<string> {
+  public async createSharedFlowchart(flowchartId: string): Promise<string> {
     try {
+      // Check if we already have a key for this flowchart
+      if (this.flowchartKeys.has(flowchartId)) {
+        this.hypercoreKey = this.flowchartKeys.get(flowchartId)!;
+        return this.hypercoreKey;
+      }
+      
       // Generate a new Hypercore key for this flowchart
       this.hypercoreKey = generateHypercoreKey();
+      
+      // Store the association between flowchart ID and its key
+      this.flowchartKeys.set(flowchartId, this.hypercoreKey);
       
       // In a real implementation, we would:
       // 1. Create a new Hypercore feed
@@ -74,6 +85,11 @@ class WebRTCService {
       store.dispatch(setSignalingError('Failed to create shared flowchart'));
       throw error;
     }
+  }
+  
+  // Get the Hypercore key for a flowchart
+  public getFlowchartKey(flowchartId: string): string | null {
+    return this.flowchartKeys.get(flowchartId) || null;
   }
   
   // Join an existing shared flowchart
