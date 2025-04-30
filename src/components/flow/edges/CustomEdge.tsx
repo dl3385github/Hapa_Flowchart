@@ -32,11 +32,12 @@ const CustomEdge: React.FC<EdgeProps> = ({
     targetPosition,
   });
 
-  // Style based on selection state
+  // Style based on selection state - make selected edges more prominent
   const edgeStyle = {
     ...style,
     stroke: selected ? '#3b82f6' : style.stroke || '#b1b1b7',
-    strokeWidth: selected ? 2 : 1,
+    strokeWidth: selected ? 3 : 1.5,
+    cursor: 'pointer', // Add pointer cursor to indicate it's selectable
   };
 
   return (
@@ -49,6 +50,17 @@ const CustomEdge: React.FC<EdgeProps> = ({
         markerEnd={markerEnd}
       />
       
+      {/* Add a transparent wider path for easier selection */}
+      <path
+        d={edgePath}
+        style={{
+          stroke: 'transparent',
+          strokeWidth: 10,
+          cursor: 'pointer',
+          fill: 'none',
+        }}
+      />
+      
       {/* Only render label if it exists */}
       {data?.label && (
         <EdgeLabelRenderer>
@@ -57,13 +69,15 @@ const CustomEdge: React.FC<EdgeProps> = ({
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'all',
+              cursor: 'pointer',
             }}
             className={`
               px-2 py-1 rounded-md text-xs
               ${selected 
-                ? 'bg-blue-100 dark:bg-blue-900 dark:bg-opacity-30 text-blue-800 dark:text-blue-200' 
+                ? 'bg-blue-100 dark:bg-blue-900 dark:bg-opacity-30 text-blue-800 dark:text-blue-200 border border-blue-400 shadow-md' 
                 : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
               }
+              transition-all duration-100
             `}
           >
             {data.label}

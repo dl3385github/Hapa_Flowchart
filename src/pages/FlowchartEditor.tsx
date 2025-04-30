@@ -23,7 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { RootState } from '../store';
 import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../store/slices/flowchartsSlice';
-import { setSelectedElements } from '../store/slices/uiSlice';
+import { setSelectedElements, clearSelection } from '../store/slices/uiSlice';
 import { FlowChanges } from '../types';
 
 // Components
@@ -335,6 +335,61 @@ const FlowchartEditor: React.FC = () => {
     
   }, [id, reactFlowInstance, dispatch, setNodes]);
   
+  // Add keyboard event handler
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      // Only process delete/backspace when we have selected elements
+      if ((event.key === 'Delete' || event.key === 'Backspace') && 
+          id && (selectedNode || selectedEdge)) {
+        
+        // Prevent deleting when user is typing in an input field
+        const activeElement = document.activeElement as HTMLElement;
+        if (activeElement?.tagName === 'INPUT' || 
+            activeElement?.tagName === 'TEXTAREA' || 
+            activeElement?.isContentEditable) {
+          return;
+        }
+        
+        const nodesToDelete = selectedNode ? [selectedNode.id] : [];
+        const edgesToDelete = selectedEdge ? [selectedEdge.id] : [];
+        
+        // If no specific node/edge is selected, use the selection from Redux state
+        const selectedElements = useSelector((state: RootState) => state.ui.selectedElements);
+        const changes: FlowChanges = {
+          nodeChanges: [
+            ...nodesToDelete.map(id => ({ type: 'remove' as const, id })),
+            ...selectedElements.nodes.map(id => ({ type: 'remove' as const, id }))
+          ],
+          edgeChanges: [
+            ...edgesToDelete.map(id => ({ type: 'remove' as const, id })),
+            ...selectedElements.edges.map(id => ({ type: 'remove' as const, id }))
+          ],
+        };
+        
+        dispatch(applyChanges({ 
+          id, 
+          changes, 
+          message: 'Deleted elements with keyboard' 
+        }));
+        
+        // Clear the selection
+        dispatch(clearSelection());
+        
+        // Prevent default browser behavior
+        event.preventDefault();
+      }
+    },
+    [id, selectedNode, selectedEdge, dispatch]
+  );
+  
+  // Set up and clean up keyboard event listeners
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+  
   if (!id) {
     return <div>No flowchart ID provided</div>;
   }
@@ -377,6 +432,9 @@ const FlowchartEditor: React.FC = () => {
             fitView
             attributionPosition="bottom-right"
             style={{ width: '100%', height: '100%' }}
+            edgesUpdatable={true}
+            edgesFocusable={true}
+            selectNodesOnDrag={false}
           >
             <Background />
             <Controls />

@@ -16,6 +16,8 @@ import {
 } from 'react-icons/hi';
 import { RootState } from '../../../store';
 import { toggleSidebar, togglePropertyPanel } from '../../../store/slices/uiSlice';
+import { applyChanges } from '../../../store/slices/flowchartsSlice';
+import { FlowChanges } from '../../../types';
 import CollaboratorsList from './CollaboratorsList';
 
 interface FlowToolbarProps {
@@ -53,9 +55,29 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   };
   
   const handleDelete = () => {
-    // In a real implementation, this would dispatch an action to delete selected elements
-    console.log('Delete selected elements', selectedElements);
-    // dispatch(deleteElements(flowchartId, selectedElements));
+    if (!hasSelection) return;
+    
+    // Create changes object for the flowcharts reducer
+    const changes: FlowChanges = {
+      nodeChanges: selectedElements.nodes.map(nodeId => ({
+        type: 'remove',
+        id: nodeId,
+      })),
+      edgeChanges: selectedElements.edges.map(edgeId => ({
+        type: 'remove',
+        id: edgeId,
+      })),
+    };
+    
+    // Dispatch the changes to delete selected elements
+    dispatch(applyChanges({ 
+      id: flowchartId, 
+      changes, 
+      message: 'Deleted selected elements' 
+    }));
+    
+    // Log deletion for debugging
+    console.log('Deleted elements:', selectedElements);
   };
   
   const handleSave = () => {
