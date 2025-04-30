@@ -5,13 +5,18 @@ import {
   setPeerConnection, 
   removePeerConnection, 
   updatePeer,
-  setSignalingError
+  setSignalingError,
+  setActiveFlowchartKey
 } from '../store/slices/collaborationSlice';
 
-// Mock hypercore key handling for now
+// More reliable key generation (we'll simulate Hypercore keys with this)
 const generateHypercoreKey = () => {
-  return Math.random().toString(36).substring(2, 15) + 
-         Math.random().toString(36).substring(2, 15);
+  // Generate a consistent key format similar to Hypercore
+  const key = new Uint8Array(32);
+  window.crypto.getRandomValues(key);
+  return Array.from(key)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 };
 
 class WebRTCService {
@@ -25,6 +30,42 @@ class WebRTCService {
   private flowchartUpdateCallback: ((data: any) => void) | null = null;
   private localUserInfo: any = null;
   private connectionEstablished: boolean = false;
+  private pendingDataRequests: Set<string> = new Set(); // Track requested flowcharts
+  private connectedFlowchartId: string | null = null;
+  
+  constructor() {
+    // Load previously stored keys from localStorage if available
+    this.loadStoredKeys();
+  }
+  
+  // Load stored flowchart keys from localStorage
+  private loadStoredKeys(): void {
+    try {
+      const storedKeys = localStorage.getItem('flowchartKeys');
+      if (storedKeys) {
+        const keyMap = JSON.parse(storedKeys);
+        Object.entries(keyMap).forEach(([id, key]) => {
+          this.flowchartKeys.set(id, key as string);
+        });
+        console.log('Loaded stored flowchart keys:', this.flowchartKeys);
+      }
+    } catch (err) {
+      console.error('Failed to load stored keys:', err);
+    }
+  }
+  
+  // Save flowchart keys to localStorage
+  private saveStoredKeys(): void {
+    try {
+      const keyMap: Record<string, string> = {};
+      this.flowchartKeys.forEach((value, key) => {
+        keyMap[key] = value;
+      });
+      localStorage.setItem('flowchartKeys', JSON.stringify(keyMap));
+    } catch (err) {
+      console.error('Failed to save stored keys:', err);
+    }
+  }
   
   // Initialize the service
   public async initialize(): Promise<string> {
@@ -99,6 +140,11 @@ class WebRTCService {
       // Check if we already have a key for this flowchart
       if (this.flowchartKeys.has(flowchartId)) {
         this.hypercoreKey = this.flowchartKeys.get(flowchartId)!;
+        
+        // Set the active flowchart key in Redux
+        store.dispatch(setActiveFlowchartKey(this.hypercoreKey));
+        
+        console.log(`Using existing Hyperswarm key for flowchart ${flowchartId}: ${this.hypercoreKey}`);
         return this.hypercoreKey;
       }
       
@@ -107,6 +153,15 @@ class WebRTCService {
       
       // Store the association between flowchart ID and its key
       this.flowchartKeys.set(flowchartId, this.hypercoreKey);
+      
+      // Track the currently connected flowchart ID
+      this.connectedFlowchartId = flowchartId;
+      
+      // Save to localStorage for persistence
+      this.saveStoredKeys();
+      
+      // Set the active flowchart key in Redux
+      store.dispatch(setActiveFlowchartKey(this.hypercoreKey));
       
       console.log(`Created new Hyperswarm key for flowchart ${flowchartId}: ${this.hypercoreKey}`);
       
@@ -125,7 +180,14 @@ class WebRTCService {
   
   // Get the Hypercore key for a flowchart
   public getFlowchartKey(flowchartId: string): string | null {
-    return this.flowchartKeys.get(flowchartId) || null;
+    const key = this.flowchartKeys.get(flowchartId) || null;
+    
+    // Set the active flowchart key in Redux
+    if (key) {
+      store.dispatch(setActiveFlowchartKey(key));
+    }
+    
+    return key;
   }
   
   // Join an existing shared flowchart
@@ -133,6 +195,21 @@ class WebRTCService {
     try {
       console.log(`Joining flowchart with Hyperswarm key: ${hypercoreKey}`);
       this.hypercoreKey = hypercoreKey;
+      
+      // Create a temporary ID for the joined flowchart
+      const tempFlowchartId = `shared-${hypercoreKey.substring(0, 8)}`;
+      
+      // Store the association between the temporary ID and its key
+      this.flowchartKeys.set(tempFlowchartId, hypercoreKey);
+      
+      // Track the currently connected flowchart ID
+      this.connectedFlowchartId = tempFlowchartId;
+      
+      // Save to localStorage for persistence
+      this.saveStoredKeys();
+      
+      // Set the active flowchart key in Redux
+      store.dispatch(setActiveFlowchartKey(hypercoreKey));
       
       // In a real P2P implementation:
       // 1. Use the hypercoreKey as the topic for Hyperswarm discovery
@@ -149,6 +226,9 @@ class WebRTCService {
         
         // Set connection status to connecting
         store.dispatch(setConnectionStatus(true));
+        
+        // Mark this flowchart key as pending a data request
+        this.pendingDataRequests.add(hypercoreKey);
         
         // We'll mark the connection as established after a brief delay
         // In a real implementation, this would happen after successful Hyperswarm discovery
@@ -437,6 +517,15 @@ class WebRTCService {
           type: 'current-flowchart',
           flowchartKey: this.hypercoreKey
         });
+        
+        // If this key is in our pending data requests, request the flowchart data
+        if (this.pendingDataRequests.has(this.hypercoreKey)) {
+          console.log(`Requesting flowchart data for key: ${this.hypercoreKey}`);
+          this.sendToPeer(peerId, {
+            type: 'request-flowchart',
+            flowchartKey: this.hypercoreKey
+          });
+        }
       }
     };
     
@@ -508,6 +597,51 @@ class WebRTCService {
         }));
       } else if (message.type === 'current-flowchart') {
         console.log(`Peer ${peerId} is working on flowchart: ${message.flowchartKey}`);
+        
+        // If we're waiting for this flowchart's data, request it now
+        if (this.pendingDataRequests.has(message.flowchartKey)) {
+          console.log(`Requesting flowchart data for key: ${message.flowchartKey}`);
+          this.sendToPeer(peerId, {
+            type: 'request-flowchart',
+            flowchartKey: message.flowchartKey
+          });
+        }
+      } else if (message.type === 'request-flowchart') {
+        // Peer is requesting flowchart data
+        console.log(`Peer ${peerId} requested flowchart data for key: ${message.flowchartKey}`);
+        
+        // Send the current flowchart state if we have it and the key matches
+        if (this.hypercoreKey === message.flowchartKey && this.connectedFlowchartId) {
+          // Get the flowchart from Redux
+          const state = store.getState();
+          const flowchart = state.flowcharts.items[this.connectedFlowchartId];
+          
+          if (flowchart) {
+            console.log(`Sending flowchart data to peer ${peerId}`);
+            this.sendToPeer(peerId, {
+              type: 'flowchart-data',
+              flowchartKey: message.flowchartKey,
+              data: {
+                properties: { id: flowchart.id, name: flowchart.name },
+                nodes: flowchart.nodes,
+                edges: flowchart.edges
+              }
+            });
+          } else {
+            console.log(`No flowchart data available for key: ${message.flowchartKey}`);
+          }
+        }
+      } else if (message.type === 'flowchart-data') {
+        // Received full flowchart data
+        console.log(`Received full flowchart data from peer ${peerId}`);
+        
+        // Remove from pending requests
+        this.pendingDataRequests.delete(message.flowchartKey);
+        
+        // Notify YjsService about the complete flowchart update
+        if (this.flowchartUpdateCallback) {
+          this.flowchartUpdateCallback(message.data);
+        }
       }
     } catch (error) {
       console.error('Failed to handle data channel message:', error);
@@ -624,6 +758,9 @@ class WebRTCService {
   public cleanup() {
     console.log('Cleaning up WebRTC connections');
     
+    // Clear any pending data requests
+    this.pendingDataRequests.clear();
+    
     // Close all data channels and peer connections
     this.dataChannels.forEach((dataChannel) => {
       dataChannel.close();
@@ -646,6 +783,7 @@ class WebRTCService {
     // Reset state
     this.hypercoreKey = null;
     this.connectionEstablished = false;
+    this.connectedFlowchartId = null;
     
     // Update Redux store
     store.dispatch(setConnectionStatus(false));

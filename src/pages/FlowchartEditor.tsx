@@ -27,7 +27,7 @@ import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../s
 import { setSelectedElements, clearSelection } from '../store/slices/uiSlice';
 import { updateLocalCursor } from '../store/slices/collaborationSlice';
 import { FlowChanges } from '../types';
-import { yjsService } from '../services';
+import { yjsService, webRTCService } from '../services';
 
 // Components
 import EditorSidebar from '../components/flow/controls/EditorSidebar';
@@ -82,6 +82,8 @@ const FlowchartEditor: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeFlowchart?.edges || []);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -97,6 +99,11 @@ const FlowchartEditor: React.FC = () => {
   useEffect(() => {
     const initializeYjs = async () => {
       if (id && id.startsWith('shared-') && activeFlowchartKey) {
+        if (isInitializing) return;
+        
+        setIsInitializing(true);
+        setInitializationError(null);
+        
         try {
           console.log('Initializing Yjs with document ID:', activeFlowchartKey);
           await yjsService.initialize(activeFlowchartKey);
@@ -106,12 +113,44 @@ const FlowchartEditor: React.FC = () => {
             const flowchartData = yjsService.getFlowchartData();
             if (flowchartData) {
               console.log('Received flowchart update from Yjs:', flowchartData);
-              setNodes(flowchartData.nodes || []);
-              setEdges(flowchartData.edges || []);
+              
+              try {
+                // Validate nodes before setting them
+                const validNodes = Array.isArray(flowchartData.nodes) 
+                  ? flowchartData.nodes.filter((node: any) => {
+                      return node && 
+                        typeof node.id === 'string' && 
+                        typeof node.type === 'string' && 
+                        node.position && 
+                        typeof node.position.x === 'number' && 
+                        typeof node.position.y === 'number';
+                    })
+                  : [];
+                
+                // Validate edges before setting them
+                const validEdges = Array.isArray(flowchartData.edges)
+                  ? flowchartData.edges.filter((edge: any) => {
+                      return edge && 
+                        typeof edge.id === 'string' && 
+                        typeof edge.source === 'string' && 
+                        typeof edge.target === 'string';
+                    })
+                  : [];
+                  
+                console.log('Setting nodes and edges in ReactFlow:', validNodes, validEdges);
+                setNodes(validNodes);
+                setEdges(validEdges);
+              } catch (err) {
+                console.error('Error processing flowchart data:', err);
+              }
             }
           });
+          
+          setIsInitializing(false);
         } catch (err) {
           console.error('Failed to initialize Yjs:', err);
+          setInitializationError('Failed to initialize collaborative editing');
+          setIsInitializing(false);
         }
       }
     };
@@ -126,9 +165,9 @@ const FlowchartEditor: React.FC = () => {
     };
   }, [id, activeFlowchartKey, setNodes, setEdges]);
   
-  // Update local nodes/edges when flowchart changes
+  // Update local nodes/edges when flowchart changes in non-collaborative mode
   useEffect(() => {
-    if (activeFlowchart) {
+    if (activeFlowchart && !isSharedFlowchart) {
       console.log('Syncing Redux state to local ReactFlow state:', activeFlowchart.nodes, activeFlowchart.edges);
       
       // Check if nodes have required properties
@@ -156,21 +195,34 @@ const FlowchartEditor: React.FC = () => {
       
       setNodes(activeFlowchart.nodes);
       setEdges(activeFlowchart.edges);
-      
-      // If this is a shared flowchart, update Yjs with initial data
-      if (id && id.startsWith('shared-') && activeFlowchartKey) {
-        yjsService.updateFlowchart({
-          properties: { id: activeFlowchart.id, name: activeFlowchart.name },
-          nodes: activeFlowchart.nodes,
-          edges: activeFlowchart.edges
-        });
-      }
-    } else {
-      console.log('Active flowchart not found, clearing local state.');
-      setNodes([]);
-      setEdges([]);
     }
-  }, [activeFlowchart, setNodes, setEdges, id, activeFlowchartKey]);
+  }, [activeFlowchart, setNodes, setEdges, isSharedFlowchart]);
+  
+  // Initialize collaborative flowchart when first loaded
+  useEffect(() => {
+    const initializeCollaborativeFlowchart = () => {
+      if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && activeFlowchart) {
+        // If this is a shared flowchart and we're the first to create it, initialize with our data
+        if (activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) {
+          console.log('Initializing collaborative flowchart with local data');
+          
+          yjsService.updateFlowchart({
+            properties: { id: activeFlowchart.id, name: activeFlowchart.name },
+            nodes: activeFlowchart.nodes,
+            edges: activeFlowchart.edges
+          });
+        } else {
+          // If we're joining an existing flowchart, request data from peers
+          console.log('Requesting collaborative flowchart data from peers');
+        }
+      }
+    };
+    
+    // One-time initialization when the component mounts
+    if (isSharedFlowchart && activeFlowchartKey && activeFlowchart) {
+      initializeCollaborativeFlowchart();
+    }
+  }, [id, activeFlowchartKey, activeFlowchart, isSharedFlowchart]);
   
   // Track mouse movement for cursor sharing
   const handleMouseMove = useCallback((event: React.MouseEvent) => {
@@ -192,7 +244,10 @@ const FlowchartEditor: React.FC = () => {
   // Sync node changes to Redux store and Yjs
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      // Apply changes to local state
       onNodesChange(changes);
+      
+      // If we have a valid flowchart ID, update Redux
       if (id && changes.length > 0) {
         dispatch(updateNodes({ id, changes }));
         
@@ -405,11 +460,45 @@ const FlowchartEditor: React.FC = () => {
     console.log('Edge property changed:', edgeId, data);
   }, []);
 
+  // Render loading state
+  if (isInitializing) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">{t('initializing_collaboration')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render error state
+  if (initializationError) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="inline-block rounded-full h-12 w-12 bg-red-100 text-red-500 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <p className="mt-4 text-red-600 dark:text-red-400">{initializationError}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors"
+          >
+            {t('retry')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!id) {
     return <div>No flowchart ID provided</div>;
   }
   
-  if (!activeFlowchart) {
+  if (!activeFlowchart && !isSharedFlowchart) {
     return <div>Loading flowchart...</div>;
   }
   

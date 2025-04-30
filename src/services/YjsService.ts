@@ -1,5 +1,4 @@
 import * as Y from 'yjs';
-import { WebrtcProvider } from 'y-webrtc';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { store } from '../store';
 import { 
@@ -21,30 +20,20 @@ interface AwarenessState {
   cursor: { x: number; y: number } | null;
 }
 
-interface YjsProviderOptions {
-  signaling: string[];
-  password: string | null;
-  awareness: any;
-  maxConns: number;
-  filterBcConns: boolean;
-  peerOpts: Record<string, any>;
-}
-
 class YjsService {
   private ydoc: Y.Doc | null = null;
-  private provider: WebrtcProvider | null = null;
   private indexeddbProvider: IndexeddbPersistence | null = null;
   private flowchartData: Y.Map<any> | null = null;
   private nodesData: Y.Array<any> | null = null;
   private edgesData: Y.Array<any> | null = null;
-  private awareness: any | null = null;
   private documentId: string | null = null;
   private connectionAttempts: number = 0;
   private maxConnectionAttempts: number = 3;
+  private initialized: boolean = false;
 
   // Initialize the Yjs document with a given ID
   public async initialize(documentId: string): Promise<void> {
-    if (this.ydoc && this.documentId === documentId) {
+    if (this.ydoc && this.documentId === documentId && this.initialized) {
       // Already initialized with this document
       return;
     }
@@ -70,11 +59,32 @@ class YjsService {
 
       // Set up persistence with IndexedDB for offline capabilities
       this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
+      
+      // Wait for IndexedDB to load data (if any exists)
+      await new Promise<void>((resolve) => {
+        if (this.indexeddbProvider) {
+          this.indexeddbProvider.on('synced', () => {
+            console.log('IndexedDB data loaded');
+            resolve();
+          });
+          
+          // Timeout after 1 second if synced doesn't happen
+          setTimeout(() => {
+            console.log('IndexedDB sync timeout');
+            resolve();
+          }, 1000);
+        } else {
+          resolve();
+        }
+      });
 
       // Store only the document ID in Redux, not the Yjs document itself
       store.dispatch(setCollaborativeDocument({
         documentId
       }));
+      
+      // Mark the service as initialized
+      this.initialized = true;
 
       console.log('Yjs initialized with document ID:', documentId);
     } catch (error) {
@@ -101,6 +111,7 @@ class YjsService {
       // Subscribe to document changes from WebRTCService
       webRTCService.onFlowchartUpdate((data) => {
         if (data && this.ydoc) {
+          console.log('Received flowchart update from WebRTCService:', data);
           this.applyRemoteChanges(data);
         }
       });
@@ -146,6 +157,8 @@ class YjsService {
   private applyRemoteChanges(data: any): void {
     if (!this.ydoc) return;
     
+    console.log('Applying remote changes to Yjs doc:', data);
+    
     this.ydoc.transact(() => {
       // Update properties
       if (data.properties && this.flowchartData) {
@@ -156,18 +169,28 @@ class YjsService {
       
       // Update nodes
       if (data.nodes && this.nodesData) {
+        // Clear existing nodes
         this.nodesData.delete(0, this.nodesData.length);
-        data.nodes.forEach((node: any) => {
-          this.nodesData?.push([node]);
-        });
+        
+        // Add new nodes
+        if (Array.isArray(data.nodes)) {
+          data.nodes.forEach((node: any) => {
+            this.nodesData?.push([node]);
+          });
+        }
       }
       
       // Update edges
       if (data.edges && this.edgesData) {
+        // Clear existing edges
         this.edgesData.delete(0, this.edgesData.length);
-        data.edges.forEach((edge: any) => {
-          this.edgesData?.push([edge]);
-        });
+        
+        // Add new edges
+        if (Array.isArray(data.edges)) {
+          data.edges.forEach((edge: any) => {
+            this.edgesData?.push([edge]);
+          });
+        }
       }
     });
     
@@ -203,6 +226,8 @@ class YjsService {
     // This would dispatch an action to update the flowchart in the Redux store
     // or trigger a callback to update the UI
     if (this.flowchartChangedCallback) {
+      const flowchartData = this.getFlowchartData();
+      console.log('Notifying flowchart updated:', flowchartData);
       this.flowchartChangedCallback();
     }
   }
@@ -216,6 +241,12 @@ class YjsService {
     
     // Subscribe to changes if not already
     this.subscribeToChanges();
+    
+    // Trigger initial update if we have data
+    const flowchartData = this.getFlowchartData();
+    if (flowchartData && (flowchartData.nodes.length > 0 || flowchartData.edges.length > 0)) {
+      setTimeout(() => callback(), 100);
+    }
   }
 
   // Update cursor position
@@ -233,6 +264,8 @@ class YjsService {
   // Update flowchart data
   public updateFlowchart(data: any): void {
     if (!this.ydoc) return;
+    
+    console.log('Updating flowchart data:', data);
 
     // Apply changes to the Yjs data structures
     this.ydoc?.transact(() => {
@@ -270,11 +303,23 @@ class YjsService {
       return null;
     }
 
-    return {
+    const data = {
       properties: this.flowchartData.toJSON(),
       nodes: this.nodesData.toArray(),
       edges: this.edgesData.toArray()
     };
+    
+    // Make sure nodes and edges are properly defined
+    if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      console.error('Invalid flowchart data structure:', data);
+      return {
+        properties: data.properties,
+        nodes: Array.isArray(data.nodes) ? data.nodes : [],
+        edges: Array.isArray(data.edges) ? data.edges : []
+      };
+    }
+    
+    return data;
   }
 
   // Generate a random color for user identification
@@ -286,13 +331,15 @@ class YjsService {
     return colors[Math.floor(Math.random() * colors.length)];
   }
 
+  // Check if this service is initialized
+  public isInitialized(): boolean {
+    return this.initialized;
+  }
+
   // Clean up Yjs resources
   public cleanup(): void {
-    if (this.provider) {
-      this.provider.destroy();
-      this.provider = null;
-    }
-
+    this.initialized = false;
+    
     if (this.indexeddbProvider) {
       this.indexeddbProvider.destroy();
       this.indexeddbProvider = null;
@@ -306,7 +353,6 @@ class YjsService {
     this.flowchartData = null;
     this.nodesData = null;
     this.edgesData = null;
-    this.awareness = null;
     this.documentId = null;
     this.flowchartChangedCallback = null;
   }

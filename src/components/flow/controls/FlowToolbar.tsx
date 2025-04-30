@@ -42,6 +42,10 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     state.collaboration.isConnected
   );
   
+  const activeFlowchartKey = useSelector((state: RootState) =>
+    state.collaboration.activeFlowchartKey
+  );
+  
   const hasSelection = selectedElements.nodes.length > 0 || selectedElements.edges.length > 0;
   const [sharingModalOpen, setSharingModalOpen] = useState(false);
   const [collaboratorsListOpen, setCollaboratorsListOpen] = useState(false);
@@ -49,6 +53,24 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   
   // Check if this is a shared flowchart (ID starts with 'shared-')
   const isSharedFlowchart = flowchartId.startsWith('shared-');
+  
+  // When the active flowchart key changes in Redux, update our local state
+  useEffect(() => {
+    if (activeFlowchartKey) {
+      setFlowchartKey(activeFlowchartKey);
+    }
+  }, [activeFlowchartKey]);
+  
+  // For shared flowcharts, ensure we have the key on component mount
+  useEffect(() => {
+    if (isSharedFlowchart && !flowchartKey) {
+      // Check if we already have a key for this flowchart
+      const existingKey = webRTCService.getFlowchartKey(flowchartId);
+      if (existingKey) {
+        setFlowchartKey(existingKey);
+      }
+    }
+  }, [flowchartId, isSharedFlowchart, flowchartKey]);
   
   // Actions
   const handleGoBack = () => {
@@ -116,6 +138,13 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     console.log('Auto-layout flowchart', flowchartId);
     alert('Auto-layout applied!');
   };
+  
+  const handleCopyKey = () => {
+    if (flowchartKey) {
+      navigator.clipboard.writeText(flowchartKey);
+      alert(t('copied_to_clipboard'));
+    }
+  }
   
   return (
     <>
@@ -227,15 +256,10 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
                   type="text"
                   value={flowchartKey || ''}
                   readOnly
-                  className="form-input rounded-r-none"
+                  className="form-input rounded-r-none flex-1 truncate"
                 />
                 <button
-                  onClick={() => {
-                    if (flowchartKey) {
-                      navigator.clipboard.writeText(flowchartKey);
-                      alert(t('copied_to_clipboard'));
-                    }
-                  }}
+                  onClick={handleCopyKey}
                   className="px-3 bg-gray-100 dark:bg-gray-700 border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-md text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
                 >
                   <HiOutlineDocumentDuplicate className="h-5 w-5" />
