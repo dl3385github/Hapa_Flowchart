@@ -80,6 +80,16 @@ const resources = {
       privacy_security: 'Is my data secure?',
       privacy_security_explanation: 'Yes, Hapa Flowchart uses end-to-end encryption and peer-to-peer connections. Your data remains private and is only shared with authorized collaborators.',
       
+      // P2P Specific
+      searching_for_peers: 'Searching for peers in the network...',
+      retrying_connection: 'Retrying connection...',
+      retry: 'Retry',
+      webrtc_initialization_failed: 'Failed to initialize P2P connection',
+      what_is_p2p: 'What is peer-to-peer (P2P)?',
+      p2p_explanation: 'Peer-to-peer means your device connects directly to other users without going through a central server. This makes collaboration faster and more private, but requires all participants to be online at the same time.',
+      waiting_for_peers: 'Waiting for peers to connect',
+      failed_to_generate_key: 'Failed to generate sharing key',
+      
       // Editor Toolbar
       toggle_sidebar: 'Toggle Sidebar',
       go_back: 'Go Back',

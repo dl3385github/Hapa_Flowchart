@@ -5,7 +5,8 @@ import { store } from '../store';
 import { 
   setCollaborativeDocument, 
   setLocalAwareness,
-  updatePeer
+  updatePeer,
+  setConnectionStatus
 } from '../store/slices/collaborationSlice';
 import webRTCService from './WebRTCService';
 
@@ -38,6 +39,8 @@ class YjsService {
   private edgesData: Y.Array<any> | null = null;
   private awareness: any | null = null;
   private documentId: string | null = null;
+  private connectionAttempts: number = 0;
+  private maxConnectionAttempts: number = 3;
 
   // Initialize the Yjs document with a given ID
   public async initialize(documentId: string): Promise<void> {
@@ -51,6 +54,7 @@ class YjsService {
 
     try {
       this.documentId = documentId;
+      this.connectionAttempts = 0;
 
       // Create a new Yjs document
       this.ydoc = new Y.Doc();
@@ -60,50 +64,17 @@ class YjsService {
       this.nodesData = this.ydoc.getArray('nodes');
       this.edgesData = this.ydoc.getArray('edges');
 
-      // Set up the WebRTC provider for real-time collaboration
-      // Use the documentId as the room name to ensure unique rooms for each flowchart
-      const roomName = `hapa-flowchart-${documentId}`;
-      const webrtcOptions: YjsProviderOptions = {
-        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
-        password: null, // Consider using a derived password for better security
-        awareness: null,
-        maxConns: 20,
-        filterBcConns: true,
-        peerOpts: {}
-      };
+      // Use direct P2P communication through our custom WebRTC implementation
+      // instead of relying on Y-js WebRTC provider with external signaling servers
+      await this.initializeDirectP2P(documentId);
 
-      console.log(`Initializing WebRTC provider with room: ${roomName}`);
-      this.provider = new WebrtcProvider(roomName, this.ydoc, webrtcOptions as any);
-      this.awareness = this.provider.awareness;
-
-      // Set up local awareness (cursor position, user info)
-      const localPeerId = webRTCService.getLocalPeerId() || 'unknown';
-      this.awareness.setLocalState({
-        user: {
-          id: localPeerId,
-          name: 'User ' + localPeerId.substring(0, 6),
-          color: this.getRandomColor()
-        },
-        cursor: null
-      });
-
-      // Set up persistence with IndexedDB
+      // Set up persistence with IndexedDB for offline capabilities
       this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
-
-      // Subscribe to changes
-      this.subscribeToChanges();
 
       // Store the document in the Redux store
       store.dispatch(setCollaborativeDocument({
         documentId,
         doc: this.ydoc
-      }));
-
-      // Update local awareness in Redux
-      const localState = this.awareness.getLocalState();
-      store.dispatch(setLocalAwareness({
-        user: localState?.user || null,
-        cursor: localState?.cursor || null
       }));
 
       console.log('Yjs initialized with document ID:', documentId);
@@ -114,9 +85,95 @@ class YjsService {
     }
   }
 
+  // Initialize direct P2P connection without external signaling servers
+  private async initializeDirectP2P(documentId: string): Promise<void> {
+    try {
+      console.log('Initializing direct P2P connection for document:', documentId);
+      
+      // Create local awareness state for this document
+      this.setupLocalAwareness();
+
+      // Let WebRTCService handle all the direct P2P connections
+      // It will use Hyperswarm for peer discovery instead of external signaling servers
+      
+      // Mark as connected - P2P connections will be handled by WebRTCService
+      store.dispatch(setConnectionStatus(true));
+      
+      // Subscribe to document changes from WebRTCService
+      webRTCService.onFlowchartUpdate((data) => {
+        if (data && this.ydoc) {
+          this.applyRemoteChanges(data);
+        }
+      });
+      
+      console.log('Direct P2P connection initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize direct P2P connection:', error);
+      if (this.connectionAttempts < this.maxConnectionAttempts) {
+        this.connectionAttempts++;
+        console.log(`Retrying connection (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
+        await this.initializeDirectP2P(documentId);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  // Set up local awareness state without relying on WebRTC provider
+  private setupLocalAwareness(): void {
+    const localPeerId = webRTCService.getLocalPeerId() || 'unknown';
+    const userInfo = {
+      id: localPeerId,
+      name: 'User ' + localPeerId.substring(0, 6),
+      color: this.getRandomColor()
+    };
+    
+    // Store local awareness state
+    store.dispatch(setLocalAwareness({
+      user: userInfo,
+      cursor: null
+    }));
+    
+    // Let WebRTCService know about our user info
+    webRTCService.setLocalUserInfo(userInfo);
+  }
+
+  // Apply remote changes to local Yjs document
+  private applyRemoteChanges(data: any): void {
+    if (!this.ydoc) return;
+    
+    this.ydoc.transact(() => {
+      // Update properties
+      if (data.properties && this.flowchartData) {
+        Object.entries(data.properties).forEach(([key, value]) => {
+          this.flowchartData?.set(key, value);
+        });
+      }
+      
+      // Update nodes
+      if (data.nodes && this.nodesData) {
+        this.nodesData.delete(0, this.nodesData.length);
+        data.nodes.forEach((node: any) => {
+          this.nodesData?.push([node]);
+        });
+      }
+      
+      // Update edges
+      if (data.edges && this.edgesData) {
+        this.edgesData.delete(0, this.edgesData.length);
+        data.edges.forEach((edge: any) => {
+          this.edgesData?.push([edge]);
+        });
+      }
+    });
+    
+    // Notify subscribers
+    this.notifyFlowchartUpdated();
+  }
+
   // Subscribe to changes in the Yjs document
   private subscribeToChanges(): void {
-    if (!this.ydoc || !this.awareness) return;
+    if (!this.ydoc) return;
 
     // Listen for flowchart data changes
     this.flowchartData?.observe(event => {
@@ -135,53 +192,6 @@ class YjsService {
       console.log('Edges data changed:', event);
       this.notifyFlowchartUpdated();
     });
-
-    // Listen for awareness changes (cursor positions, user info)
-    this.awareness.on('change', () => {
-      this.handleAwarenessChange();
-    });
-
-    // Listen for connection status changes
-    if (this.provider) {
-      this.provider.on('status', ({ connected }: { connected: boolean }) => {
-        console.log('WebRTC connection status changed:', connected);
-      });
-    }
-  }
-
-  // Handle awareness changes (e.g., cursor positions)
-  private handleAwarenessChange(): void {
-    // Handle awareness changes
-    if (!this.awareness) return;
-    
-    // Extract the states of all users
-    const states = this.awareness.getStates();
-    
-    if (states) {
-      // Update peers in the Redux store based on awareness states
-      states.forEach((state: AwarenessState, clientId: number) => {
-        if (state && state.user && clientId !== this.awareness?.clientID) {
-          const user = state.user;
-          // Update peer information in store directly
-          store.dispatch(updatePeer({
-            peerId: user.id,
-            info: {
-              name: user.name,
-              color: user.color,
-              cursor: state.cursor || undefined,
-              peerId: user.id
-            }
-          }));
-          
-          // Also update via WebRTC service
-          webRTCService.updatePeerFromAwareness(user.id, {
-            name: user.name,
-            color: user.color,
-            cursor: state.cursor || undefined
-          });
-        }
-      });
-    }
   }
 
   // Notify that the flowchart has been updated
@@ -199,25 +209,26 @@ class YjsService {
   // Set callback for flowchart changes
   public onFlowchartChanged(callback: () => void): void {
     this.flowchartChangedCallback = callback;
+    
+    // Subscribe to changes if not already
+    this.subscribeToChanges();
   }
 
   // Update cursor position
   public updateCursorPosition(x: number, y: number): void {
-    if (!this.awareness) return;
-
-    const state = this.awareness.getLocalState();
-    if (state) {
-      state.cursor = { x, y };
-      this.awareness.setLocalState(state);
-      
-      // Also update WebRTC service
-      webRTCService.sendCursorPosition(x, y);
-    }
+    // Send cursor position via WebRTCService
+    webRTCService.sendCursorPosition(x, y);
+    
+    // Update local awareness state in Redux
+    store.dispatch(setLocalAwareness({
+      user: store.getState().collaboration.localAwareness.user,
+      cursor: { x, y }
+    }));
   }
 
   // Update flowchart data
   public updateFlowchart(data: any): void {
-    if (!this.flowchartData) return;
+    if (!this.ydoc) return;
 
     // Apply changes to the Yjs data structures
     this.ydoc?.transact(() => {
@@ -245,7 +256,7 @@ class YjsService {
       }
     });
 
-    // Also update through WebRTC for redundancy
+    // Also update through WebRTC for P2P synchronization
     webRTCService.sendFlowchartUpdate(data);
   }
 
