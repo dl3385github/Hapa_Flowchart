@@ -14,6 +14,7 @@ import FlowchartEditor from './pages/FlowchartEditor';
 import TaskIntegration from './pages/TaskIntegration';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
+import JoinFlowchart from './pages/JoinFlowchart';
 
 // Styles
 import './styles/index.css';
@@ -67,7 +68,7 @@ const App: React.FC = () => {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="editor/:id" element={<FlowchartEditor />} />
-          <Route path="editor/new" element={<FlowchartEditor />} />
+          <Route path="join" element={<JoinFlowchart />} />
           <Route path="tasks" element={<TaskIntegration />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />

@@ -18,6 +18,7 @@ const resources = {
       flowcharts: 'Flowcharts',
       settings: 'Settings',
       help: 'Help',
+      my_flowcharts: 'My Flowcharts',
       
       // Flowchart Editor
       new_flowchart: 'New Flowchart',
@@ -33,6 +34,11 @@ const resources = {
       start_end: 'Start/End',
       input_output: 'Input/Output',
       task: 'Task',
+      process_description: 'A process or action step',
+      decision_description: 'A decision point with multiple paths',
+      start_end_description: 'Starting or ending point of the flowchart',
+      task_description: 'A task linked to Hapa Task Manager',
+      data_description: 'Data input or output',
       
       // Task Integration
       connect_to_task_manager: 'Connect to Task Manager',
@@ -43,6 +49,36 @@ const resources = {
       invite_collaborators: 'Invite Collaborators',
       share_key: 'Share Key',
       active_collaborators: 'Active Collaborators',
+      join_flowchart: 'Join Flowchart',
+      hypercore_key: 'Hypercore Key',
+      paste_hypercore_key: 'Paste the Hypercore key here',
+      connecting: 'Connecting...',
+      join: 'Join',
+      please_enter_key: 'Please enter a Hypercore key',
+      connection_failed: 'Connection failed. Please try again.',
+      join_flowchart_instruction: 'Enter the Hypercore key shared with you to join and collaborate on a flowchart.',
+      
+      // Join Flowchart FAQ
+      frequently_asked_questions: 'Frequently Asked Questions',
+      where_to_find_key: 'Where do I find the Hypercore key?',
+      find_key_explanation: 'The person who created the flowchart can share the key with you. They can find it by clicking the "Share" button in the flowchart editor.',
+      connection_issues: 'What if I have connection issues?',
+      connection_issues_explanation: 'Make sure you have a stable internet connection and that the key is correct. If problems persist, try rejoining or contact the flowchart owner.',
+      privacy_security: 'Is my data secure?',
+      privacy_security_explanation: 'Yes, Hapa Flowchart uses end-to-end encryption and peer-to-peer connections. Your data remains private and is only shared with authorized collaborators.',
+      
+      // Editor Toolbar
+      toggle_sidebar: 'Toggle Sidebar',
+      go_back: 'Go Back',
+      auto_layout: 'Auto Layout',
+      connect_to_task: 'Connect to Task',
+      toggle_properties: 'Toggle Properties',
+      share_flowchart: 'Share Flowchart',
+      copied_to_clipboard: 'Copied to clipboard',
+      share_key_description: 'Share this key with collaborators so they can join this flowchart.',
+      p2p_status: 'P2P Status',
+      ready_for_collaboration: 'Ready for collaboration',
+      close: 'Close',
       
       // Settings
       language: 'Language',
@@ -54,6 +90,32 @@ const resources = {
       connection_error: 'Connection Error',
       save_error: 'Error Saving',
       generic_error: 'Something went wrong',
+      
+      // Dashboard
+      recent_flowcharts: 'Recent Flowcharts',
+      no_flowcharts_yet: 'You haven\'t created any flowcharts yet',
+      create_first_flowchart: 'Create your first flowchart',
+      name: 'Name',
+      description: 'Description',
+      optional: 'optional',
+      flowchart_name_placeholder: 'Enter flowchart name',
+      flowchart_description_placeholder: 'Enter a brief description',
+      create: 'Create',
+      confirm_delete_flowchart: 'Are you sure you want to delete this flowchart?',
+      
+      // Editor
+      node_palette: 'Node Palette',
+      drag_nodes_instruction: 'Drag elements onto the canvas to create your flowchart',
+      tips: 'Tips',
+      tip_drag_nodes: 'Drag elements from the palette to the canvas',
+      tip_connect_nodes: 'Click and drag from node handles to create connections',
+      tip_select_multiple: 'Hold Shift to select multiple elements',
+      tip_delete_selection: 'Press Delete key to remove selected elements',
+      flowchart: 'Flowchart',
+      label: 'Label',
+      task_id: 'Task ID',
+      enter_task_id: 'Enter Task ID',
+      task_id_description: 'ID of the task from Hapa Task Manager',
     },
   },
 };

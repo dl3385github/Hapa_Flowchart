@@ -7,7 +7,8 @@ import {
   HiOutlineClipboardCheck,
   HiOutlineCog,
   HiOutlineQuestionMarkCircle,
-  HiOutlineX
+  HiOutlineX,
+  HiOutlineUserAdd
 } from 'react-icons/hi';
 
 interface SidebarProps {
@@ -34,7 +35,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
       <nav className="mt-8">
         <ul>
           <NavItem to="/dashboard" icon={<HiOutlineHome />} label={t('dashboard')} isCollapsed={!isOpen} />
-          <NavItem to="/editor/new" icon={<HiOutlineDocumentText />} label={t('new_flowchart')} isCollapsed={!isOpen} />
+          <NavItem to="/dashboard" icon={<HiOutlineDocumentText />} label={t('my_flowcharts')} isCollapsed={!isOpen} />
+          <NavItem to="/join" icon={<HiOutlineUserAdd />} label={t('join_flowchart')} isCollapsed={!isOpen} />
           <NavItem to="/tasks" icon={<HiOutlineClipboardCheck />} label={t('connect_to_task_manager')} isCollapsed={!isOpen} />
           <NavItem to="/settings" icon={<HiOutlineCog />} label={t('settings')} isCollapsed={!isOpen} />
           <NavItem to="/help" icon={<HiOutlineQuestionMarkCircle />} label={t('help')} isCollapsed={!isOpen} />

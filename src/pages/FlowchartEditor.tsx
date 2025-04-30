@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { useTranslation } from 'react-i18next';
@@ -16,8 +16,10 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   addEdge,
+  ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { v4 as uuidv4 } from 'uuid';
 
 import { RootState } from '../store';
 import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../store/slices/flowchartsSlice';
@@ -72,6 +74,9 @@ const FlowchartEditor: React.FC = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState(activeFlowchart?.edges || []);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
   
   // Set active flowchart when ID changes
   useEffect(() => {
@@ -155,6 +160,60 @@ const FlowchartEditor: React.FC = () => {
     [id, dispatch, setEdges]
   );
   
+  // Handle drag over for the ReactFlow area
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+  
+  // Handle drop for adding new nodes
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      
+      if (!reactFlowInstance || !reactFlowWrapper.current) return;
+      
+      // Get the position of the drop relative to the ReactFlow canvas
+      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+      const position = reactFlowInstance.project({
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top,
+      });
+      
+      try {
+        // Parse the data transfer to get node type and data
+        const nodeData = JSON.parse(event.dataTransfer.getData('application/reactflow'));
+        
+        // Create a new node
+        const newNode: Node = {
+          id: `${nodeData.type}_${uuidv4()}`,
+          type: nodeData.type,
+          position,
+          data: nodeData.data,
+        };
+        
+        // Update Redux state with the new node
+        if (id) {
+          const change: FlowChanges = {
+            nodeChanges: [
+              {
+                type: 'add',
+                item: newNode,
+              },
+            ],
+            edgeChanges: [],
+          };
+          
+          dispatch(applyChanges({ id, changes: change }));
+          setNodes((nds) => [...nds, newNode]);
+        }
+      } catch (error) {
+        console.error('Error adding node:', error);
+      }
+    },
+    [id, reactFlowInstance, dispatch, setNodes]
+  );
+  
   if (!id) {
     return <div>No flowchart ID provided</div>;
   }
@@ -174,7 +233,7 @@ const FlowchartEditor: React.FC = () => {
           <EditorSidebar />
         </div>
         
-        <div className="flex-1 h-full">
+        <div className="flex-1 h-full" ref={reactFlowWrapper}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -187,6 +246,9 @@ const FlowchartEditor: React.FC = () => {
             connectionLineType={ConnectionLineType.SmoothStep}
             snapToGrid={snapToGrid}
             snapGrid={[gridSize, gridSize]}
+            onInit={setReactFlowInstance}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
             fitView
             attributionPosition="bottom-right"
           >
