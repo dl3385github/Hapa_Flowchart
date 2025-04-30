@@ -41,6 +41,22 @@ class WebRTCService {
     }
   }
   
+  // Get the local peer ID
+  public getLocalPeerId(): string | null {
+    return this.localPeerId;
+  }
+
+  // Update peer information from awareness data
+  public updatePeerFromAwareness(peerId: string, info: any): void {
+    store.dispatch(updatePeer({
+      peerId,
+      info: {
+        ...info,
+        peerId
+      }
+    }));
+  }
+  
   // Create and share a flowchart
   public async createSharedFlowchart(): Promise<string> {
     try {
@@ -81,13 +97,21 @@ class WebRTCService {
         // 2. Establish connections
         // 3. Start replicating the Hypercore feed
         
+        // Initialize Yjs document with this key
+        const yjsService = await import('./YjsService').then(m => m.default);
+        await yjsService.initialize(hypercoreKey);
+        
         return true;
       } else {
         throw new Error('Signaling server not connected');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to join shared flowchart:', error);
-      store.dispatch(setSignalingError('Failed to join: ' + error.message));
+      if (error instanceof Error) {
+        store.dispatch(setSignalingError('Failed to join: ' + error.message));
+      } else {
+        store.dispatch(setSignalingError('Failed to join flowchart'));
+      }
       store.dispatch(setConnectionStatus(false));
       return false;
     }
@@ -104,13 +128,18 @@ class WebRTCService {
         // Simulate successful connection after a delay
         setTimeout(() => {
           this.signalingServer = {} as WebSocket;
-          this.signalingServer.readyState = WebSocket.OPEN;
+          // Use defineProperty to set read-only property in a way that doesn't trigger TypeScript error
+          Object.defineProperty(this.signalingServer, 'readyState', {
+            value: WebSocket.OPEN,
+            writable: false
+          });
           this.signalingServer.send = (data: string) => {
             console.log('Sending to signaling server:', data);
             
             // Simulate receiving a response
             setTimeout(() => {
-              if (this.onSignalingMessage) {
+              const onSignalingMessageCopy = this.onSignalingMessage;
+              if (typeof onSignalingMessageCopy === 'function') {
                 const message = JSON.parse(data);
                 
                 if (message.type === 'join') {
@@ -325,6 +354,18 @@ class WebRTCService {
         peerId,
         connection: 'connected'
       }));
+
+      // Initialize Yjs if it's not already initialized
+      if (this.hypercoreKey) {
+        import('./YjsService').then(async m => {
+          const yjsService = m.default;
+          try {
+            await yjsService.initialize(this.hypercoreKey!);
+          } catch (err) {
+            console.error("Failed to initialize Yjs:", err);
+          }
+        });
+      }
     };
     
     dataChannel.onclose = () => {
@@ -349,8 +390,13 @@ class WebRTCService {
       // Handle different message types
       if (message.type === 'flowchart-update') {
         // Handle flowchart update
-        // This would be implemented based on your application's needs
-      } else if (message.type === 'cursor-update') {
+        console.log('Received flowchart update from peer:', peerId);
+        import('./YjsService').then(m => {
+          const yjsService = m.default;
+          // Apply the changes through Yjs
+          yjsService.updateFlowchart(message.data);
+        });
+      } else if (message.type === 'cursor-update' || message.type === 'cursor-position') {
         // Update peer cursor position
         store.dispatch(updatePeer({
           peerId,
@@ -435,7 +481,7 @@ class WebRTCService {
   // Send cursor position to all connected peers
   public sendCursorPosition(x: number, y: number) {
     const message = JSON.stringify({
-      type: 'cursor-update',
+      type: 'cursor-position',
       x,
       y,
       timestamp: Date.now()
@@ -475,6 +521,12 @@ class WebRTCService {
     
     // Update Redux store
     store.dispatch(setConnectionStatus(false));
+
+    // Clean up Yjs resources
+    import('./YjsService').then(m => {
+      const yjsService = m.default;
+      yjsService.cleanup();
+    });
   }
 }
 

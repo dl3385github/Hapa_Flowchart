@@ -71,6 +71,7 @@ export interface CollaboratorInfo {
   did?: string;
   peerId: string;
   name?: string;
+  color?: string;
   cursor?: {
     x: number;
     y: number;

@@ -17,6 +17,7 @@ import ReactFlow, {
   useEdgesState,
   addEdge,
   ReactFlowInstance,
+  BackgroundVariant,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
@@ -24,12 +25,15 @@ import { v4 as uuidv4 } from 'uuid';
 import { RootState } from '../store';
 import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../store/slices/flowchartsSlice';
 import { setSelectedElements, clearSelection } from '../store/slices/uiSlice';
+import { updateLocalCursor } from '../store/slices/collaborationSlice';
 import { FlowChanges } from '../types';
+import { yjsService } from '../services';
 
 // Components
 import EditorSidebar from '../components/flow/controls/EditorSidebar';
 import PropertyPanel from '../components/flow/controls/PropertyPanel';
 import FlowToolbar from '../components/flow/controls/FlowToolbar';
+import PeerCursors from '../components/collaboration/PeerCursors';
 
 // Node types
 import ProcessNode from '../components/flow/nodes/ProcessNode';
@@ -68,6 +72,7 @@ const FlowchartEditor: React.FC = () => {
   const activeFlowchart = id && flowcharts[id] ? flowcharts[id] : null;
   const { snapToGrid, gridSize } = useSelector((state: RootState) => state.settings);
   const { propertyPanelOpen } = useSelector((state: RootState) => state.ui);
+  const { isConnected, activeFlowchartKey } = useSelector((state: RootState) => state.collaboration);
   
   // Local ReactFlow state
   const [nodes, setNodes, onNodesChange] = useNodesState(activeFlowchart?.nodes || []);
@@ -84,6 +89,39 @@ const FlowchartEditor: React.FC = () => {
       dispatch(setActiveFlowchart(id));
     }
   }, [id, flowcharts, dispatch]);
+  
+  // Initialize Yjs for collaborative editing
+  useEffect(() => {
+    const initializeYjs = async () => {
+      if (id && id.startsWith('shared-') && activeFlowchartKey) {
+        try {
+          console.log('Initializing Yjs with document ID:', activeFlowchartKey);
+          await yjsService.initialize(activeFlowchartKey);
+          
+          // Subscribe to flowchart changes
+          yjsService.onFlowchartChanged(() => {
+            const flowchartData = yjsService.getFlowchartData();
+            if (flowchartData) {
+              console.log('Received flowchart update from Yjs:', flowchartData);
+              setNodes(flowchartData.nodes || []);
+              setEdges(flowchartData.edges || []);
+            }
+          });
+        } catch (err) {
+          console.error('Failed to initialize Yjs:', err);
+        }
+      }
+    };
+    
+    initializeYjs();
+    
+    return () => {
+      // Cleanup Yjs when component unmounts
+      if (id && id.startsWith('shared-')) {
+        yjsService.cleanup();
+      }
+    };
+  }, [id, activeFlowchartKey]);
   
   // Update local nodes/edges when flowchart changes
   useEffect(() => {
@@ -115,33 +153,104 @@ const FlowchartEditor: React.FC = () => {
       
       setNodes(activeFlowchart.nodes);
       setEdges(activeFlowchart.edges);
+      
+      // If this is a shared flowchart, update Yjs with initial data
+      if (id && id.startsWith('shared-') && activeFlowchartKey) {
+        yjsService.updateFlowchart({
+          properties: { id: activeFlowchart.id, name: activeFlowchart.name },
+          nodes: activeFlowchart.nodes,
+          edges: activeFlowchart.edges
+        });
+      }
     } else {
       console.log('Active flowchart not found, clearing local state.');
       setNodes([]);
       setEdges([]);
     }
-  }, [activeFlowchart, setNodes, setEdges]);
+  }, [activeFlowchart, setNodes, setEdges, id, activeFlowchartKey]);
   
-  // Sync node changes to Redux store
+  // Track mouse movement for cursor sharing
+  const handleMouseMove = useCallback((event: React.MouseEvent) => {
+    if (!reactFlowWrapper.current || !reactFlowInstance || !isConnected) return;
+    
+    const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+    const position = reactFlowInstance.project({
+      x: event.clientX - reactFlowBounds.left,
+      y: event.clientY - reactFlowBounds.top,
+    });
+    
+    // Update cursor position in Redux
+    dispatch(updateLocalCursor({ x: position.x, y: position.y }));
+    
+    // Broadcast cursor position via Yjs
+    yjsService.updateCursorPosition(position.x, position.y);
+  }, [reactFlowInstance, isConnected, dispatch]);
+  
+  // Sync node changes to Redux store and Yjs
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
       if (id && changes.length > 0) {
         dispatch(updateNodes({ id, changes }));
+        
+        // Update collaborative state if connected
+        if (id.startsWith('shared-') && isConnected) {
+          // Apply changes locally first
+          const updatedNodes = [...nodes];
+          changes.forEach(change => {
+            if (change.type === 'position' && change.position) {
+              const nodeIndex = updatedNodes.findIndex(n => n.id === change.id);
+              if (nodeIndex !== -1) {
+                updatedNodes[nodeIndex] = {
+                  ...updatedNodes[nodeIndex],
+                  position: change.position
+                };
+              }
+            }
+          });
+          
+          // Broadcast changes via Yjs
+          yjsService.updateFlowchart({
+            nodes: updatedNodes,
+            edges
+          });
+        }
       }
     },
-    [id, dispatch, onNodesChange]
+    [id, dispatch, onNodesChange, nodes, edges, isConnected]
   );
   
-  // Sync edge changes to Redux store
+  // Sync edge changes to Redux store and Yjs
   const handleEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       onEdgesChange(changes);
       if (id && changes.length > 0) {
         dispatch(updateEdges({ id, changes }));
+        
+        // Update collaborative state if connected
+        if (id.startsWith('shared-') && isConnected) {
+          // Apply changes locally first
+          const updatedEdges = [...edges];
+          
+          // Handle edge changes
+          changes.forEach(change => {
+            if (change.type === 'remove') {
+              const edgeIndex = updatedEdges.findIndex(e => e.id === change.id);
+              if (edgeIndex !== -1) {
+                updatedEdges.splice(edgeIndex, 1);
+              }
+            }
+          });
+          
+          // Broadcast changes via Yjs
+          yjsService.updateFlowchart({
+            nodes,
+            edges: updatedEdges
+          });
+        }
       }
     },
-    [id, dispatch, onEdgesChange]
+    [id, dispatch, onEdgesChange, nodes, edges, isConnected]
   );
   
   // Handle selection changes
@@ -188,9 +297,18 @@ const FlowchartEditor: React.FC = () => {
         };
 
         dispatch(applyChanges({ id, changes: change }));
+        
+        // Update collaborative state if connected
+        if (id.startsWith('shared-') && isConnected) {
+          const updatedEdges = [...edges, newEdge];
+          yjsService.updateFlowchart({
+            nodes,
+            edges: updatedEdges
+          });
+        }
       }
     },
-    [id, dispatch]
+    [id, dispatch, nodes, edges, isConnected]
   );
   
   // Handle drag over for the ReactFlow area
@@ -256,140 +374,34 @@ const FlowchartEditor: React.FC = () => {
         };
 
         dispatch(applyChanges({ id, changes: change }));
-        console.log('Dispatched applyChanges for new node');
         
-        // Also update local state directly (temporarily add this back)
-        setNodes((nds) => [...nds, newNode]);
-        console.log('Directly updated local nodes state');
-
-      } catch (error) {
-        console.error('Error adding node:', error);
-      }
-    },
-    [id, reactFlowInstance, dispatch, setNodes, nodeTypes]
-  );
-  
-  // Add onInit handler with logging
-  const onInit = useCallback((instance: ReactFlowInstance) => {
-    console.log('ReactFlow initialized', instance);
-    
-    // Check if our container has proper dimensions
-    if (reactFlowWrapper.current) {
-      const { width, height } = reactFlowWrapper.current.getBoundingClientRect();
-      console.log('ReactFlow container dimensions:', { width, height });
-      
-      if (width === 0 || height === 0) {
-        console.error('ReactFlow container has zero width or height!');
-      }
-    }
-    
-    setReactFlowInstance(instance);
-    
-    // Try to force fit view after a short delay to ensure rendering
-    setTimeout(() => {
-      instance.fitView({ padding: 0.2 });
-      console.log('Forced fitView after initialization');
-    }, 100);
-    
-  }, []);
-  
-  // Add this function after the other callback functions
-  const addDebugNode = useCallback(() => {
-    if (!reactFlowInstance || !id) return;
-    
-    console.log('Creating debug node');
-    
-    // Get viewport center for positioning
-    const viewport = reactFlowInstance.getViewport();
-    const position = reactFlowInstance.project({
-      x: window.innerWidth / 2,
-      y: window.innerHeight / 2,
-    });
-
-    const newNode: Node = {
-      id: `debug_${uuidv4()}`,
-      type: 'simpleTestNode', // Use the simple test node
-      position,
-      data: { label: 'DEBUG NODE' },
-    };
-    
-    console.log('Debug node details:', newNode);
-    
-    // Update both Redux and local state
-    const change: FlowChanges = {
-      nodeChanges: [
-        {
-          type: 'add',
-          item: newNode,
-        },
-      ],
-      edgeChanges: [],
-    };
-    
-    dispatch(applyChanges({ id, changes: change }));
-    console.log('Dispatched applyChanges for debug node');
-    
-    // Also update local state directly
-    setNodes((nds) => [...nds, newNode]);
-    console.log('Directly updated local nodes state with debug node');
-    
-  }, [id, reactFlowInstance, dispatch, setNodes]);
-  
-  // Add keyboard event handler
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      // Only process delete/backspace when we have selected elements
-      if ((event.key === 'Delete' || event.key === 'Backspace') && 
-          id && (selectedNode || selectedEdge)) {
-        
-        // Prevent deleting when user is typing in an input field
-        const activeElement = document.activeElement as HTMLElement;
-        if (activeElement?.tagName === 'INPUT' || 
-            activeElement?.tagName === 'TEXTAREA' || 
-            activeElement?.isContentEditable) {
-          return;
+        // Update collaborative state if connected
+        if (id.startsWith('shared-') && isConnected) {
+          const updatedNodes = [...nodes, newNode];
+          yjsService.updateFlowchart({
+            nodes: updatedNodes,
+            edges
+          });
         }
-        
-        const nodesToDelete = selectedNode ? [selectedNode.id] : [];
-        const edgesToDelete = selectedEdge ? [selectedEdge.id] : [];
-        
-        // If no specific node/edge is selected, use the selection from Redux state
-        const selectedElements = useSelector((state: RootState) => state.ui.selectedElements);
-        const changes: FlowChanges = {
-          nodeChanges: [
-            ...nodesToDelete.map(id => ({ type: 'remove' as const, id })),
-            ...selectedElements.nodes.map(id => ({ type: 'remove' as const, id }))
-          ],
-          edgeChanges: [
-            ...edgesToDelete.map(id => ({ type: 'remove' as const, id })),
-            ...selectedElements.edges.map(id => ({ type: 'remove' as const, id }))
-          ],
-        };
-        
-        dispatch(applyChanges({ 
-          id, 
-          changes, 
-          message: 'Deleted elements with keyboard' 
-        }));
-        
-        // Clear the selection
-        dispatch(clearSelection());
-        
-        // Prevent default browser behavior
-        event.preventDefault();
+      } catch (error) {
+        console.error('Error processing drop event:', error);
       }
     },
-    [id, selectedNode, selectedEdge, dispatch]
+    [id, dispatch, reactFlowInstance, nodes, edges, isConnected]
   );
-  
-  // Set up and clean up keyboard event listeners
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyDown]);
-  
+
+  // Handle node property changes
+  const handleNodeChange = useCallback((nodeId: string, data: any) => {
+    // Implementation for property panel
+    console.log('Node property changed:', nodeId, data);
+  }, []);
+
+  // Handle edge property changes
+  const handleEdgeChange = useCallback((edgeId: string, data: any) => {
+    // Implementation for property panel
+    console.log('Edge property changed:', edgeId, data);
+  }, []);
+
   if (!id) {
     return <div>No flowchart ID provided</div>;
   }
@@ -399,64 +411,70 @@ const FlowchartEditor: React.FC = () => {
   }
   
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-shrink-0">
-        <FlowToolbar flowchartId={id} />
-      </div>
+    <div className="flex flex-1 h-full overflow-hidden">
+      <EditorSidebar />
       
-      <div className="flex flex-1 h-full overflow-hidden">
-        <div className="flex-shrink-0">
-          <EditorSidebar />
-        </div>
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        <FlowToolbar flowchartId={id || ''} />
         
-        <div 
-          className="flex-1 relative h-full w-full min-h-[500px] border-4 border-purple-500 bg-gray-100" 
-          ref={reactFlowWrapper} 
-          style={{ height: '100%' }}
-        >
+        <div className="flex-1 relative" ref={reactFlowWrapper} onMouseMove={handleMouseMove}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
-            onSelectionChange={handleSelectionChange}
             onConnect={handleConnect}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            connectionLineType={ConnectionLineType.SmoothStep}
-            snapToGrid={snapToGrid}
-            snapGrid={[gridSize, gridSize]}
-            onInit={onInit}
+            onSelectionChange={handleSelectionChange}
+            onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            connectionLineType={ConnectionLineType.Straight}
+            snapToGrid={snapToGrid}
+            snapGrid={[gridSize, gridSize]}
+            deleteKeyCode={['Backspace', 'Delete']}
+            multiSelectionKeyCode={['Control', 'Meta']}
             fitView
-            attributionPosition="bottom-right"
-            style={{ width: '100%', height: '100%' }}
-            edgesUpdatable={true}
-            edgesFocusable={true}
-            selectNodesOnDrag={false}
           >
-            <Background />
+            <Background 
+              variant={BackgroundVariant.Dots}
+              gap={gridSize} 
+              size={1}
+              color="#aaa"
+            />
             <Controls />
-            <MiniMap />
-            
+            <MiniMap
+              nodeStrokeColor={(node) => {
+                return '#ddd';
+              }}
+              nodeColor={(node) => {
+                return node.data.color || '#eee';
+              }}
+              nodeBorderRadius={3}
+            />
             <Panel position="top-right">
-              {t('flowchart')}: {activeFlowchart.name}
+              {isConnected && (
+                <div className="bg-indigo-600 text-white px-3 py-1 rounded-md shadow-md">
+                  {t('collaborating_now')}
+                </div>
+              )}
             </Panel>
+            
+            {/* Display peer cursors */}
+            {isConnected && <PeerCursors />}
           </ReactFlow>
         </div>
-        
-        {propertyPanelOpen && (
-          <div className="flex-shrink-0 w-64 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto">
-            <PropertyPanel 
-              selectedNode={selectedNode} 
-              selectedEdge={selectedEdge} 
-              onNodeChange={() => {}} // Implement node property changes
-              onEdgeChange={() => {}} // Implement edge property changes
-            />
-          </div>
-        )}
       </div>
+      
+      {propertyPanelOpen && (
+        <PropertyPanel
+          selectedNode={selectedNode}
+          selectedEdge={selectedEdge}
+          onNodeChange={handleNodeChange}
+          onEdgeChange={handleEdgeChange}
+        />
+      )}
     </div>
   );
 };

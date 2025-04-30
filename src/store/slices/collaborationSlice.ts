@@ -8,6 +8,18 @@ interface CollaborationState {
   activeFlowchartKey: string | null;
   peerConnections: Record<string, any>; // WebRTC connections are not serializable
   signalingError: string | null;
+  collaborativeDocument: {
+    documentId: string | null;
+    doc: any | null;
+  };
+  localAwareness: {
+    user: {
+      id: string | null;
+      name: string;
+      color: string;
+    } | null;
+    cursor: { x: number; y: number } | null;
+  };
 }
 
 const initialState: CollaborationState = {
@@ -17,6 +29,14 @@ const initialState: CollaborationState = {
   activeFlowchartKey: null,
   peerConnections: {},
   signalingError: null,
+  collaborativeDocument: {
+    documentId: null,
+    doc: null
+  },
+  localAwareness: {
+    user: null,
+    cursor: null
+  }
 };
 
 export const collaborationSlice = createSlice({
@@ -86,6 +106,20 @@ export const collaborationSlice = createSlice({
     setSignalingError: (state, action: PayloadAction<string | null>) => {
       state.signalingError = action.payload;
     },
+
+    setCollaborativeDocument: (state, action: PayloadAction<{ documentId: string; doc: any }>) => {
+      state.collaborativeDocument = action.payload;
+    },
+
+    setLocalAwareness: (state, action: PayloadAction<{ user: any; cursor: any }>) => {
+      state.localAwareness = action.payload;
+    },
+
+    updateLocalCursor: (state, action: PayloadAction<{ x: number; y: number }>) => {
+      if (state.localAwareness.user) {
+        state.localAwareness.cursor = action.payload;
+      }
+    },
   },
 });
 
@@ -99,6 +133,9 @@ export const {
   setActiveFlowchartKey,
   clearPeers,
   setSignalingError,
+  setCollaborativeDocument,
+  setLocalAwareness,
+  updateLocalCursor,
 } = collaborationSlice.actions;
 
 export default collaborationSlice.reducer; 
