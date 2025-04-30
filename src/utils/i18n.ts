@@ -57,6 +57,19 @@ const resources = {
       please_enter_key: 'Please enter a Hypercore key',
       connection_failed: 'Connection failed. Please try again.',
       join_flowchart_instruction: 'Enter the Hypercore key shared with you to join and collaborate on a flowchart.',
+      collaborators: 'Collaborators',
+      show_collaborators: 'Show Collaborators',
+      online: 'Online',
+      offline: 'Offline',
+      you: 'You',
+      last_seen: 'Last seen',
+      just_now: 'just now',
+      minutes_ago: '{{count}} minute ago',
+      minutes_ago_plural: '{{count}} minutes ago',
+      hours_ago: '{{count}} hour ago',
+      hours_ago_plural: '{{count}} hours ago',
+      days_ago: '{{count}} day ago',
+      days_ago_plural: '{{count}} days ago',
       
       // Join Flowchart FAQ
       frequently_asked_questions: 'Frequently Asked Questions',
@@ -116,6 +129,16 @@ const resources = {
       task_id: 'Task ID',
       enter_task_id: 'Enter Task ID',
       task_id_description: 'ID of the task from Hapa Task Manager',
+      
+      // Consul Integration
+      my_consuls: 'My Consuls',
+      all_consuls: 'All Consuls',
+      consul_flowcharts: 'Consul Flowcharts',
+      join_consul: 'Join Consul',
+      create_consul: 'Create Consul',
+      back_to_consuls: 'Back to Consuls',
+      workspaces: 'Workspaces',
+      consul_not_found: 'Consul not found',
     },
   },
 };

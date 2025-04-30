@@ -71,6 +71,7 @@ const App: React.FC = () => {
           <Route path="join" element={<JoinFlowchart />} />
           <Route path="tasks" element={<TaskIntegration />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="consul/:id" element={<Dashboard consulView={true} />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

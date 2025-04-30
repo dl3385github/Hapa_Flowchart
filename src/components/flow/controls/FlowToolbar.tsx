@@ -12,10 +12,11 @@ import {
   HiOutlineViewGrid,
   HiOutlineClipboardList,
   HiOutlineMenuAlt2,
+  HiOutlineUsers,
 } from 'react-icons/hi';
 import { RootState } from '../../../store';
-import { toggleSidebar } from '../../../store/slices/uiSlice';
-import { togglePropertyPanel } from '../../../store/slices/uiSlice';
+import { toggleSidebar, togglePropertyPanel } from '../../../store/slices/uiSlice';
+import CollaboratorsList from './CollaboratorsList';
 
 interface FlowToolbarProps {
   flowchartId: string;
@@ -36,6 +37,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   
   const hasSelection = selectedElements.nodes.length > 0 || selectedElements.edges.length > 0;
   const [sharingModalOpen, setSharingModalOpen] = useState(false);
+  const [collaboratorsListOpen, setCollaboratorsListOpen] = useState(false);
   
   // Actions
   const handleGoBack = () => {
@@ -64,6 +66,10 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   
   const handleShare = () => {
     setSharingModalOpen(true);
+  };
+  
+  const handleToggleCollaborators = () => {
+    setCollaboratorsListOpen(!collaboratorsListOpen);
   };
   
   const handleAutoLayout = () => {
@@ -120,6 +126,18 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
             title={t('toggle_properties')}
           >
             <HiOutlineDocumentDuplicate className="h-5 w-5" />
+          </button>
+          
+          <button
+            onClick={handleToggleCollaborators}
+            className={`p-2 rounded-md ${
+              collaboratorsListOpen
+                ? 'bg-blue-50 text-blue-600 dark:bg-blue-900 dark:bg-opacity-30 dark:text-blue-300'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+            title={t('show_collaborators')}
+          >
+            <HiOutlineUsers className="h-5 w-5" />
           </button>
           
           <button
@@ -217,6 +235,12 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
           </div>
         </div>
       )}
+      
+      {/* Collaborators List */}
+      <CollaboratorsList 
+        isOpen={collaboratorsListOpen} 
+        onClose={() => setCollaboratorsListOpen(false)} 
+      />
     </>
   );
 };

@@ -70,6 +70,7 @@ export interface FlowChanges {
 export interface CollaboratorInfo {
   did?: string;
   peerId: string;
+  name?: string;
   cursor?: {
     x: number;
     y: number;

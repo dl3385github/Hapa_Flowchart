@@ -164,25 +164,42 @@ const FlowchartEditor: React.FC = () => {
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+    console.log('Dragging over ReactFlow area');
   }, []);
   
   // Handle drop for adding new nodes
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      console.log('Drop event triggered');
       
-      if (!reactFlowInstance || !reactFlowWrapper.current) return;
+      if (!reactFlowInstance || !reactFlowWrapper.current) {
+        console.error('ReactFlow instance or wrapper is not available');
+        return;
+      }
       
       // Get the position of the drop relative to the ReactFlow canvas
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+      console.log('ReactFlow bounds:', reactFlowBounds);
+      
       const position = reactFlowInstance.project({
         x: event.clientX - reactFlowBounds.left,
         y: event.clientY - reactFlowBounds.top,
       });
+      console.log('Projected position:', position);
       
       try {
         // Parse the data transfer to get node type and data
-        const nodeData = JSON.parse(event.dataTransfer.getData('application/reactflow'));
+        const rawData = event.dataTransfer.getData('application/reactflow');
+        console.log('Dropped data:', rawData);
+        
+        if (!rawData) {
+          console.error('No data found in drop event');
+          return;
+        }
+        
+        const nodeData = JSON.parse(rawData);
+        console.log('Parsed node data:', nodeData);
         
         // Create a new node
         const newNode: Node = {
@@ -191,6 +208,7 @@ const FlowchartEditor: React.FC = () => {
           position,
           data: nodeData.data,
         };
+        console.log('Creating new node:', newNode);
         
         // Update Redux state with the new node
         if (id) {
@@ -206,6 +224,9 @@ const FlowchartEditor: React.FC = () => {
           
           dispatch(applyChanges({ id, changes: change }));
           setNodes((nds) => [...nds, newNode]);
+          console.log('Node added successfully');
+        } else {
+          console.error('No flowchart ID available');
         }
       } catch (error) {
         console.error('Error adding node:', error);
@@ -213,6 +234,12 @@ const FlowchartEditor: React.FC = () => {
     },
     [id, reactFlowInstance, dispatch, setNodes]
   );
+  
+  // Add onInit handler with logging
+  const onInit = useCallback((instance: ReactFlowInstance) => {
+    console.log('ReactFlow initialized', instance);
+    setReactFlowInstance(instance);
+  }, []);
   
   if (!id) {
     return <div>No flowchart ID provided</div>;
@@ -233,7 +260,7 @@ const FlowchartEditor: React.FC = () => {
           <EditorSidebar />
         </div>
         
-        <div className="flex-1 h-full" ref={reactFlowWrapper}>
+        <div className="flex-1 h-full w-full relative" ref={reactFlowWrapper}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -246,7 +273,7 @@ const FlowchartEditor: React.FC = () => {
             connectionLineType={ConnectionLineType.SmoothStep}
             snapToGrid={snapToGrid}
             snapGrid={[gridSize, gridSize]}
-            onInit={setReactFlowInstance}
+            onInit={onInit}
             onDrop={onDrop}
             onDragOver={onDragOver}
             fitView

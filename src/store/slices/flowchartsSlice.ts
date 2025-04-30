@@ -3,6 +3,28 @@ import { Node, Edge, applyNodeChanges, applyEdgeChanges, NodeChange, EdgeChange 
 import { v4 as uuidv4 } from 'uuid';
 import { Flowchart, FlowChanges, Version, LinkedTask } from '../../types';
 
+// Load flowcharts from localStorage
+const loadFlowchartsFromStorage = (): Record<string, Flowchart> => {
+  try {
+    const savedFlowcharts = localStorage.getItem('hapaFlowcharts');
+    if (savedFlowcharts) {
+      return JSON.parse(savedFlowcharts);
+    }
+  } catch (error) {
+    console.error('Error loading flowcharts from localStorage:', error);
+  }
+  return {};
+};
+
+// Save flowcharts to localStorage
+const saveFlowchartsToStorage = (flowcharts: Record<string, Flowchart>) => {
+  try {
+    localStorage.setItem('hapaFlowcharts', JSON.stringify(flowcharts));
+  } catch (error) {
+    console.error('Error saving flowcharts to localStorage:', error);
+  }
+};
+
 interface FlowchartsState {
   items: Record<string, Flowchart>;
   activeId: string | null;
@@ -13,7 +35,7 @@ interface FlowchartsState {
 }
 
 const initialState: FlowchartsState = {
-  items: {},
+  items: loadFlowchartsFromStorage(),
   activeId: null,
   loading: false,
   error: null,
@@ -41,6 +63,9 @@ export const flowchartsSlice = createSlice({
         nodes: [],
         edges: [],
       };
+      
+      // Save to localStorage
+      saveFlowchartsToStorage(state.items);
       
       state.activeId = id;
       state.versions[id] = [{
@@ -70,6 +95,9 @@ export const flowchartsSlice = createSlice({
         state.items[id].nodes = applyNodeChanges(changes, state.items[id].nodes);
         state.items[id].updatedAt = new Date().toISOString();
         // Increment version would happen here in a real implementation with version tracking
+        
+        // Save to localStorage
+        saveFlowchartsToStorage(state.items);
       }
     },
     
@@ -80,6 +108,9 @@ export const flowchartsSlice = createSlice({
         state.items[id].edges = applyEdgeChanges(changes, state.items[id].edges);
         state.items[id].updatedAt = new Date().toISOString();
         // Increment version would happen here in a real implementation with version tracking
+        
+        // Save to localStorage
+        saveFlowchartsToStorage(state.items);
       }
     },
     
@@ -129,6 +160,9 @@ export const flowchartsSlice = createSlice({
               .map(change => change.id),
           },
         });
+        
+        // Save to localStorage
+        saveFlowchartsToStorage(state.items);
       }
     },
     
@@ -171,12 +205,16 @@ export const flowchartsSlice = createSlice({
             data: {
               ...updatedNodes[nodeIndex].data,
               taskId,
+              flowchartId, // Include flowchartId in node data for TaskNode component
             },
           };
           state.items[flowchartId].nodes = updatedNodes;
           state.items[flowchartId].updatedAt = new Date().toISOString();
         }
       }
+      
+      // Save to localStorage
+      saveFlowchartsToStorage(state.items);
     },
     
     // Import a flowchart (for loading from file or hypercore)
@@ -184,6 +222,9 @@ export const flowchartsSlice = createSlice({
       const flowchart = action.payload;
       state.items[flowchart.id] = flowchart;
       state.activeId = flowchart.id;
+      
+      // Save to localStorage
+      saveFlowchartsToStorage(state.items);
     },
     
     // Delete a flowchart
@@ -195,6 +236,9 @@ export const flowchartsSlice = createSlice({
       }
       delete state.versions[id];
       delete state.linkedTasks[id];
+      
+      // Save to localStorage
+      saveFlowchartsToStorage(state.items);
     },
   },
 });

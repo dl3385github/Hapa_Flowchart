@@ -1,8 +1,11 @@
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDispatch } from 'react-redux';
-import { HiOutlineX } from 'react-icons/hi';
+import { HiOutlineX, HiOutlinePlusCircle } from 'react-icons/hi';
 import { setSidebarOpen } from '../../../store/slices/uiSlice';
+import { v4 as uuidv4 } from 'uuid';
+import { useParams } from 'react-router-dom';
+import { applyChanges } from '../../../store/slices/flowchartsSlice';
 
 // Define the node types that can be dragged into the flow editor
 const nodeTypes = [
@@ -46,20 +49,56 @@ const nodeTypes = [
 const EditorSidebar: React.FC = () => {
   const { t } = useTranslation();
   const dispatch = useDispatch();
+  const { id } = useParams<{ id: string }>();
   
   const onDragStart = useCallback((event: React.DragEvent, nodeType: string, nodeData: any) => {
     // Set data for the drag operation
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({
+    const data = JSON.stringify({
       type: nodeType,
       data: {
         ...nodeData,
         label: t(nodeData.label) || nodeData.label,
       },
-    }));
+    });
+    
+    console.log('Starting drag operation with data:', data);
+    
+    event.dataTransfer.setData('application/reactflow', data);
     
     // This is needed for Firefox
     event.dataTransfer.effectAllowed = 'move';
   }, [t]);
+  
+  const handleAddNode = useCallback((nodeType: string, nodeData: any) => {
+    if (!id) return;
+    
+    // Create a new node at the center of the viewport
+    const newNode = {
+      id: `${nodeType}_${uuidv4()}`,
+      type: nodeType,
+      position: { x: 100, y: 100 }, // Default position
+      data: {
+        ...nodeData,
+        label: t(nodeData.label) || nodeData.label,
+      },
+    };
+    
+    // Update Redux state with the new node
+    dispatch(
+      applyChanges({
+        id,
+        changes: {
+          nodeChanges: [
+            {
+              type: 'add',
+              item: newNode,
+            },
+          ],
+          edgeChanges: [],
+        },
+      })
+    );
+  }, [id, dispatch, t]);
   
   const closeSidebar = () => {
     dispatch(setSidebarOpen(false));
@@ -88,13 +127,14 @@ const EditorSidebar: React.FC = () => {
           {nodeTypes.map((node) => (
             <div
               key={node.type}
-              className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600 cursor-grab hover:shadow-md transition-shadow"
+              className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600 cursor-grab hover:shadow-md transition-shadow relative group"
               draggable
               onDragStart={(event) => onDragStart(event, node.type, node.data)}
+              onClick={() => handleAddNode(node.type, node.data)}
             >
               <div className="flex items-center">
                 <span className="text-xl mr-3">{node.icon}</span>
-                <div>
+                <div className="flex-1">
                   <div className="font-medium text-gray-900 dark:text-white">
                     {t(node.label)}
                   </div>
@@ -102,6 +142,7 @@ const EditorSidebar: React.FC = () => {
                     {t(node.description)}
                   </div>
                 </div>
+                <HiOutlinePlusCircle className="h-5 w-5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           ))}
