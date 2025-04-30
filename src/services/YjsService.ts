@@ -71,10 +71,9 @@ class YjsService {
       // Set up persistence with IndexedDB for offline capabilities
       this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
 
-      // Store the document in the Redux store
+      // Store only the document ID in Redux, not the Yjs document itself
       store.dispatch(setCollaborativeDocument({
-        documentId,
-        doc: this.ydoc
+        documentId
       }));
 
       console.log('Yjs initialized with document ID:', documentId);
@@ -117,6 +116,11 @@ class YjsService {
         throw error;
       }
     }
+  }
+
+  // Get the Yjs document (for components that need direct access)
+  public getYDoc(): Y.Doc | null {
+    return this.ydoc;
   }
 
   // Set up local awareness state without relying on WebRTC provider

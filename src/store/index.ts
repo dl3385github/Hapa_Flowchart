@@ -16,8 +16,23 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ['collaboration/setPeerConnection', 'collaboration/updatePeers'],
-        ignoredPaths: ['collaboration.peerConnections'],
+        ignoredActions: [
+          // Collaboration-related actions that might contain non-serializable data
+          'collaboration/setPeerConnection', 
+          'collaboration/updatePeers',
+          'collaboration/setCollaborativeDocument',
+          'collaboration/setLocalAwareness',
+          'collaboration/updateLocalCursor',
+          'collaboration/updatePeer',
+          'collaboration/updatePeerCursor'
+        ],
+        ignoredPaths: [
+          // Paths in the state that might contain non-serializable data
+          'collaboration.peerConnections',
+          'collaboration.collaborativeDocument',
+          'collaboration.localAwareness',
+          'collaboration.peers'
+        ],
       },
     }),
 });

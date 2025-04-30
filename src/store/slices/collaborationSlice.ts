@@ -10,7 +10,6 @@ interface CollaborationState {
   signalingError: string | null;
   collaborativeDocument: {
     documentId: string | null;
-    doc: any | null;
   };
   localAwareness: {
     user: {
@@ -31,7 +30,6 @@ const initialState: CollaborationState = {
   signalingError: null,
   collaborativeDocument: {
     documentId: null,
-    doc: null
   },
   localAwareness: {
     user: null,
@@ -107,8 +105,10 @@ export const collaborationSlice = createSlice({
       state.signalingError = action.payload;
     },
 
-    setCollaborativeDocument: (state, action: PayloadAction<{ documentId: string; doc: any }>) => {
-      state.collaborativeDocument = action.payload;
+    setCollaborativeDocument: (state, action: PayloadAction<{ documentId: string }>) => {
+      state.collaborativeDocument = {
+        documentId: action.payload.documentId
+      };
     },
 
     setLocalAwareness: (state, action: PayloadAction<{ user: any; cursor: any }>) => {
