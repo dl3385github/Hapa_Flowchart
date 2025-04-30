@@ -260,38 +260,139 @@ class WebRTCService {
     return new Promise((resolve, reject) => {
       try {
         // In a real implementation, this would be replaced with direct Hyperswarm discovery
-        // For now, we simulate this with a mock implementation
         console.log('Connecting to P2P discovery network...');
         
-        // Simulate successful connection after a delay
-        setTimeout(() => {
-          this.signalingServer = {} as WebSocket;
-          // Use defineProperty to set read-only property in a way that doesn't trigger TypeScript error
-          Object.defineProperty(this.signalingServer, 'readyState', {
-            value: WebSocket.OPEN,
-            writable: false
-          });
-          this.signalingServer.send = (data: string) => {
-            console.log('Broadcasting to P2P network:', data);
-            
-            // Simulate receiving a response
-            setTimeout(() => {
-              try {
-                const message = JSON.parse(data);
-                
-                if (message.type === 'join') {
-                  // Simulate discovering peers using Hyperswarm
-                  this.simulateDiscoveredPeers(message.flowchartKey);
-                }
-              } catch (error) {
-                console.error('Error parsing message:', error);
-              }
-            }, 1000);
-          };
+        // Create a simulated Hyperswarm network that properly routes messages based on flowchart keys
+        const activeTopics = new Map<string, Set<string>>(); // Maps flowchart keys to peers
+        
+        this.signalingServer = {} as WebSocket;
+        // Set to OPEN state
+        Object.defineProperty(this.signalingServer, 'readyState', {
+          value: WebSocket.OPEN,
+          writable: false
+        });
+        
+        // Set up message handlers for the simulated network
+        this.signalingServer.onmessage = () => {}; // Will be set later
+        
+        // Implement send method for proper signaling
+        this.signalingServer.send = (data: string) => {
+          console.log('Broadcasting to P2P network:', data);
           
-          console.log('Successfully connected to P2P discovery network');
-          resolve();
-        }, 500);
+          try {
+            const message = JSON.parse(data);
+            
+            // Handle different message types
+            if (message.type === 'join') {
+              const { flowchartKey, peerId } = message;
+              
+              // Store peer as interested in this topic
+              if (!activeTopics.has(flowchartKey)) {
+                activeTopics.set(flowchartKey, new Set<string>());
+              }
+              
+              // Add this peer to the topic
+              activeTopics.get(flowchartKey)?.add(peerId);
+              
+              console.log(`Peer ${peerId} joined topic ${flowchartKey}`);
+              console.log(`Active peers in topic ${flowchartKey}:`, Array.from(activeTopics.get(flowchartKey) || []));
+              
+              // Notify this peer about other peers on the same topic
+              setTimeout(() => {
+                // Get all other peers in this topic
+                const peers = Array.from(activeTopics.get(flowchartKey) || [])
+                  .filter(id => id !== peerId);
+                
+                // Connect to each peer
+                peers.forEach(otherPeerId => {
+                  // Simulate peer discovery
+                  if (this.signalingServer && this.signalingServer.onmessage) {
+                    this.signalingServer.onmessage({
+                      data: JSON.stringify({
+                        type: 'peer-discovered',
+                        flowchartKey,
+                        peerId: otherPeerId,
+                        peerInfo: {
+                          name: `User-${otherPeerId.substring(0, 6)}`
+                        }
+                      })
+                    } as MessageEvent);
+                    
+                    // Also notify other peers about this peer
+                    setTimeout(() => {
+                      // This would happen on the other peer's side in a real implementation
+                      console.log(`Notifying peer ${otherPeerId} about new peer ${peerId}`);
+                      // In a real implementation, the message would be sent to the actual peer
+                    }, 300);
+                  }
+                });
+              }, 500);
+            }
+            // Handle offers, answers, and ICE candidates
+            else if (['offer', 'answer', 'ice-candidate'].includes(message.type)) {
+              const { target } = message;
+              
+              // Forward the message to the target peer
+              // In a real implementation, this would happen through the Hyperswarm network
+              setTimeout(() => {
+                console.log(`Forwarding ${message.type} to peer ${target}`);
+                
+                // Find which topics this peer is in
+                let targetFlowchartKey: string | undefined;
+                for (const [key, peers] of activeTopics.entries()) {
+                  if (peers.has(target)) {
+                    targetFlowchartKey = key;
+                    break;
+                  }
+                }
+                
+                if (targetFlowchartKey) {
+                  // Simulate the target peer receiving the message
+                  this.onSignalingMessage(message);
+                } else {
+                  console.warn(`Target peer ${target} not found in any topic`);
+                }
+              }, 200);
+            }
+            else if (message.type === 'announce') {
+              const { flowchartKey, peerId } = message;
+              
+              // Add peer to topic
+              if (!activeTopics.has(flowchartKey)) {
+                activeTopics.set(flowchartKey, new Set<string>());
+              }
+              activeTopics.get(flowchartKey)?.add(peerId);
+              
+              console.log(`Peer ${peerId} announced presence on topic ${flowchartKey}`);
+              
+              // Notify about existing peers
+              const peers = Array.from(activeTopics.get(flowchartKey) || [])
+                .filter(id => id !== peerId);
+              
+              peers.forEach(otherPeerId => {
+                setTimeout(() => {
+                  if (this.signalingServer && this.signalingServer.onmessage) {
+                    this.signalingServer.onmessage({
+                      data: JSON.stringify({
+                        type: 'peer-discovered',
+                        flowchartKey,
+                        peerId: otherPeerId,
+                        peerInfo: {
+                          name: `User-${otherPeerId.substring(0, 6)}`
+                        }
+                      })
+                    } as MessageEvent);
+                  }
+                }, 300);
+              });
+            }
+          } catch (error) {
+            console.error('Error processing P2P message:', error);
+          }
+        };
+        
+        console.log('Successfully connected to P2P discovery network');
+        resolve();
       } catch (error) {
         console.error('Failed to connect to P2P discovery network:', error);
         reject(error);
@@ -488,7 +589,7 @@ class WebRTCService {
     }
   }
   
-  // Set up a data channel
+  // Set up a data channel for a peer
   private setupDataChannel(peerId: string, dataChannel: RTCDataChannel) {
     console.log(`Setting up data channel for peer: ${peerId}`);
     this.dataChannels.set(peerId, dataChannel);
@@ -496,34 +597,41 @@ class WebRTCService {
     dataChannel.onopen = () => {
       console.log(`Data channel to ${peerId} opened - P2P connection established`);
       
+      // Send our user info
+      if (this.localUserInfo) {
+        this.sendToPeer(peerId, {
+          type: 'user-info',
+          info: this.localUserInfo
+        });
+      }
+      
       // Update Redux store
       store.dispatch(setPeerConnection({
         peerId,
         connection: 'connected'
       }));
-
-      // If we have local user info, send it to the peer
-      if (this.localUserInfo) {
+      
+      // If we're sharing a flowchart, inform the peer
+      if (this.hypercoreKey && this.connectedFlowchartId) {
+        console.log(`Informing peer ${peerId} about active flowchart: ${this.hypercoreKey}`);
         this.sendToPeer(peerId, {
-          type: 'user-info',
-          data: this.localUserInfo
-        });
-      }
-
-      // If we have a current flowchart key, alert connected peers
-      if (this.hypercoreKey) {
-        console.log(`Sending current flowchart key to peer: ${this.hypercoreKey}`);
-        this.sendToPeer(peerId, {
-          type: 'current-flowchart',
+          type: 'active-flowchart',
           flowchartKey: this.hypercoreKey
         });
         
-        // If this key is in our pending data requests, request the flowchart data
-        if (this.pendingDataRequests.has(this.hypercoreKey)) {
-          console.log(`Requesting flowchart data for key: ${this.hypercoreKey}`);
+        // Send the current flowchart data if we're the source
+        const state = store.getState();
+        if (this.connectedFlowchartId && state.flowcharts.items[this.connectedFlowchartId]) {
+          const flowchart = state.flowcharts.items[this.connectedFlowchartId];
+          console.log(`Sending current flowchart data to peer ${peerId}`);
           this.sendToPeer(peerId, {
-            type: 'request-flowchart',
-            flowchartKey: this.hypercoreKey
+            type: 'flowchart-data',
+            flowchartKey: this.hypercoreKey,
+            data: {
+              properties: { id: flowchart.id, name: flowchart.name },
+              nodes: flowchart.nodes,
+              edges: flowchart.edges
+            }
           });
         }
       }
@@ -566,15 +674,21 @@ class WebRTCService {
       
       // Handle different message types
       if (message.type === 'flowchart-update') {
-        // Handle flowchart update
-        console.log('Received flowchart update from peer:', peerId);
-        
         // Notify YjsService about the update
         if (this.flowchartUpdateCallback) {
+          console.log('Received flowchart update from peer:', message.data);
           this.flowchartUpdateCallback(message.data);
         }
-      } else if (message.type === 'cursor-update' || message.type === 'cursor-position') {
-        // Update peer cursor position
+      } 
+      else if (message.type === 'user-info') {
+        // Update peer info in Redux
+        store.dispatch(updatePeer({
+          peerId,
+          info: message.info
+        }));
+      }
+      else if (message.type === 'cursor-position') {
+        // Update cursor position in Redux
         store.dispatch(updatePeer({
           peerId,
           info: {
@@ -584,18 +698,8 @@ class WebRTCService {
             }
           }
         }));
-      } else if (message.type === 'user-info') {
-        // Update peer user info
-        console.log(`Received user info from peer ${peerId}:`, message.data);
-        store.dispatch(updatePeer({
-          peerId,
-          info: {
-            ...message.data,
-            peerId,
-            lastSeen: new Date().toISOString()
-          }
-        }));
-      } else if (message.type === 'current-flowchart') {
+      }
+      else if (message.type === 'active-flowchart') {
         console.log(`Peer ${peerId} is working on flowchart: ${message.flowchartKey}`);
         
         // If we're waiting for this flowchart's data, request it now
@@ -606,7 +710,8 @@ class WebRTCService {
             flowchartKey: message.flowchartKey
           });
         }
-      } else if (message.type === 'request-flowchart') {
+      } 
+      else if (message.type === 'request-flowchart') {
         // Peer is requesting flowchart data
         console.log(`Peer ${peerId} requested flowchart data for key: ${message.flowchartKey}`);
         
@@ -631,7 +736,8 @@ class WebRTCService {
             console.log(`No flowchart data available for key: ${message.flowchartKey}`);
           }
         }
-      } else if (message.type === 'flowchart-data') {
+      } 
+      else if (message.type === 'flowchart-data') {
         // Received full flowchart data
         console.log(`Received full flowchart data from peer ${peerId}`);
         
@@ -641,6 +747,28 @@ class WebRTCService {
         // Notify YjsService about the complete flowchart update
         if (this.flowchartUpdateCallback) {
           this.flowchartUpdateCallback(message.data);
+        }
+      }
+      else if (message.type === 'node-operation') {
+        // Handle node operations (move, delete, add)
+        console.log(`Received node operation from peer ${peerId}:`, message.operation);
+        
+        if (this.flowchartUpdateCallback) {
+          // Pass the operation to YjsService
+          this.flowchartUpdateCallback({
+            nodeOperation: message.operation
+          });
+        }
+      }
+      else if (message.type === 'edge-operation') {
+        // Handle edge operations (create, delete)
+        console.log(`Received edge operation from peer ${peerId}:`, message.operation);
+        
+        if (this.flowchartUpdateCallback) {
+          // Pass the operation to YjsService
+          this.flowchartUpdateCallback({
+            edgeOperation: message.operation
+          });
         }
       }
     } catch (error) {
@@ -681,24 +809,40 @@ class WebRTCService {
   
   // Simulate discovered peers for testing
   private simulateDiscoveredPeers(flowchartKey: string) {
-    console.log(`Simulating peer discovery for flowchart key: ${flowchartKey}`);
+    console.log(`Finding peers for flowchart key: ${flowchartKey}`);
     
-    // Simulate 1-3 peers
-    const peerCount = Math.floor(Math.random() * 3) + 1;
+    // In a real implementation, this would use Hyperswarm's topic-based discovery
+    // Here we're improving the simulation to better connect with specific peers
     
-    for (let i = 0; i < peerCount; i++) {
-      const peerId = `peer-${i}-${Math.random().toString(36).substring(2, 8)}`;
+    // Send a message to announce our presence on this hypercore key
+    if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
+      this.signalingServer.send(JSON.stringify({
+        type: 'announce',
+        flowchartKey: flowchartKey,
+        peerId: this.localPeerId
+      }));
       
-      setTimeout(() => {
-        console.log(`Discovered peer via Hyperswarm: ${peerId}`);
-        this.onSignalingMessage({
-          type: 'peer-joined',
-          peerId,
-          peerInfo: {
-            name: `User ${i+1}`,
+      console.log(`Announced presence on hypercore key: ${flowchartKey}`);
+      
+      // Setup handling for peers joining this hypercore key
+      this.signalingServer.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          if (message.type === 'peer-discovered' && message.flowchartKey === flowchartKey) {
+            const { peerId, peerInfo } = message;
+            console.log(`Discovered peer via Hyperswarm: ${peerId}`);
+            
+            // Connect to the discovered peer
+            this.connectToPeer(peerId);
+            
+            // Update peer info in Redux
+            this.handlePeerJoined(peerId, peerInfo || {});
           }
-        });
-      }, 800 + i * 500);
+        } catch (error) {
+          console.error('Error handling peer discovery message:', error);
+        }
+      };
     }
   }
   

@@ -29,21 +29,6 @@ const CollaboratorsList: React.FC<CollaboratorsListProps> = ({ isOpen, onClose }
       isCurrentUser: false,
       lastSeen: peer.lastSeen,
     }))),
-    // Example of offline users (in a real app, these would come from a server)
-    {
-      peerId: 'offline-user-1',
-      name: 'Alice',
-      isOnline: false,
-      isCurrentUser: false,
-      lastSeen: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
-    },
-    {
-      peerId: 'offline-user-2',
-      name: 'Bob',
-      isOnline: false,
-      isCurrentUser: false,
-      lastSeen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-    },
   ];
   
   // Format last seen time

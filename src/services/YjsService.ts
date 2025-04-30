@@ -159,6 +159,117 @@ class YjsService {
     
     console.log('Applying remote changes to Yjs doc:', data);
     
+    // Handle node operations (move, delete, add)
+    if (data.nodeOperation) {
+      const op = data.nodeOperation;
+      console.log('Applying node operation:', op);
+      
+      // Get the current nodes from the document
+      const nodes = this.getFlowchartData()?.nodes || [];
+      
+      if (op.type === 'move') {
+        // Update the position of the node
+        const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              position: op.position
+            };
+          }
+          return node;
+        });
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      }
+      else if (op.type === 'delete') {
+        // Remove the node
+        const updatedNodes = nodes.filter((node: {id: string}) => node.id !== op.id);
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+        
+        // Also remove any edges connected to this node
+        const edges = this.getFlowchartData()?.edges || [];
+        const updatedEdges = edges.filter((edge: {source: string; target: string}) => 
+          edge.source !== op.id && edge.target !== op.id
+        );
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'add') {
+        // Add the new node
+        const updatedNodes = [...nodes, op.node];
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      }
+      else if (op.type === 'update') {
+        // Update node properties
+        const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              ...op.data
+            };
+          }
+          return node;
+        });
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
+      return;
+    }
+    
+    // Handle edge operations (create, delete)
+    if (data.edgeOperation) {
+      const op = data.edgeOperation;
+      console.log('Applying edge operation:', op);
+      
+      // Get the current edges from the document
+      const edges = this.getFlowchartData()?.edges || [];
+      
+      if (op.type === 'add') {
+        // Add the new edge
+        const updatedEdges = [...edges, op.edge];
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'delete') {
+        // Remove the edge
+        const updatedEdges = edges.filter((edge: {id: string}) => edge.id !== op.id);
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'update') {
+        // Update edge properties
+        const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
+          if (edge.id === op.id) {
+            return {
+              ...edge,
+              ...op.data
+            };
+          }
+          return edge;
+        });
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
+      return;
+    }
+    
+    // Handle complete flowchart updates
     this.ydoc.transact(() => {
       // Update properties
       if (data.properties && this.flowchartData) {
@@ -196,6 +307,36 @@ class YjsService {
     
     // Notify subscribers
     this.notifyFlowchartUpdated();
+  }
+  
+  // Utility method to update nodes data
+  private updateNodesData(nodes: Array<{id: string; type: string; position: {x: number; y: number}; [key: string]: any}>): void {
+    if (!this.ydoc || !this.nodesData) return;
+    
+    this.ydoc.transact(() => {
+      // Clear existing nodes
+      this.nodesData?.delete(0, this.nodesData.length);
+      
+      // Add new nodes
+      nodes.forEach(node => {
+        this.nodesData?.push([node]);
+      });
+    });
+  }
+  
+  // Utility method to update edges data
+  private updateEdgesData(edges: Array<{id: string; source: string; target: string; [key: string]: any}>): void {
+    if (!this.ydoc || !this.edgesData) return;
+    
+    this.ydoc.transact(() => {
+      // Clear existing edges
+      this.edgesData?.delete(0, this.edgesData.length);
+      
+      // Add new edges
+      edges.forEach(edge => {
+        this.edgesData?.push([edge]);
+      });
+    });
   }
 
   // Subscribe to changes in the Yjs document

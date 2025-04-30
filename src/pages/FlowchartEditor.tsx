@@ -18,6 +18,8 @@ import ReactFlow, {
   addEdge,
   ReactFlowInstance,
   BackgroundVariant,
+  applyNodeChanges,
+  applyEdgeChanges
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
@@ -241,75 +243,110 @@ const FlowchartEditor: React.FC = () => {
     yjsService.updateCursorPosition(position.x, position.y);
   }, [reactFlowInstance, isConnected, dispatch]);
   
-  // Sync node changes to Redux store and Yjs
-  const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => {
-      // Apply changes to local state
-      onNodesChange(changes);
+  // Handle node changes
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    // Apply the changes locally
+    onNodesChange(changes);
+    
+    // If this is a shared flowchart, broadcast the changes
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
+      console.log('Broadcasting node changes:', changes);
       
-      // If we have a valid flowchart ID, update Redux
-      if (id && changes.length > 0) {
+      changes.forEach(change => {
+        if (change.type === 'position' && change.position) {
+          // Send node position update to peers
+          webRTCService.sendFlowchartUpdate({
+            nodeOperation: {
+              type: 'move',
+              id: change.id,
+              position: change.position
+            }
+          });
+        } else if (change.type === 'remove') {
+          // Send node deletion to peers
+          webRTCService.sendFlowchartUpdate({
+            nodeOperation: {
+              type: 'delete',
+              id: change.id
+            }
+          });
+        }
+      });
+    } else {
+      // Regular non-collaborative flowchart
+      if (id && activeFlowchart) {
+        const updatedNodes = applyNodeChanges(changes, activeFlowchart.nodes);
         dispatch(updateNodes({ id, changes }));
-        
-        // Update collaborative state if connected
-        if (id.startsWith('shared-') && isConnected) {
-          // Apply changes locally first
-          const updatedNodes = [...nodes];
-          changes.forEach(change => {
-            if (change.type === 'position' && change.position) {
-              const nodeIndex = updatedNodes.findIndex(n => n.id === change.id);
-              if (nodeIndex !== -1) {
-                updatedNodes[nodeIndex] = {
-                  ...updatedNodes[nodeIndex],
-                  position: change.position
-                };
-              }
-            }
-          });
-          
-          // Broadcast changes via Yjs
-          yjsService.updateFlowchart({
-            nodes: updatedNodes,
-            edges
-          });
-        }
       }
-    },
-    [id, dispatch, onNodesChange, nodes, edges, isConnected]
-  );
+    }
+  }, [id, onNodesChange, activeFlowchart, dispatch, activeFlowchartKey]);
   
-  // Sync edge changes to Redux store and Yjs
-  const handleEdgesChange = useCallback(
-    (changes: EdgeChange[]) => {
-      onEdgesChange(changes);
-      if (id && changes.length > 0) {
-        dispatch(updateEdges({ id, changes }));
-        
-        // Update collaborative state if connected
-        if (id.startsWith('shared-') && isConnected) {
-          // Apply changes locally first
-          const updatedEdges = [...edges];
-          
-          // Handle edge changes
-          changes.forEach(change => {
-            if (change.type === 'remove') {
-              const edgeIndex = updatedEdges.findIndex(e => e.id === change.id);
-              if (edgeIndex !== -1) {
-                updatedEdges.splice(edgeIndex, 1);
-              }
+  // Handle edge changes
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    // Apply the changes locally
+    onEdgesChange(changes);
+    
+    // If this is a shared flowchart, broadcast the changes
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
+      console.log('Broadcasting edge changes:', changes);
+      
+      changes.forEach(change => {
+        if (change.type === 'remove') {
+          // Send edge deletion to peers
+          webRTCService.sendFlowchartUpdate({
+            edgeOperation: {
+              type: 'delete',
+              id: change.id
             }
           });
-          
-          // Broadcast changes via Yjs
-          yjsService.updateFlowchart({
-            nodes,
-            edges: updatedEdges
-          });
         }
+      });
+    } else {
+      // Regular non-collaborative flowchart
+      if (id && activeFlowchart) {
+        dispatch(updateEdges({ id, changes }));
       }
-    },
-    [id, dispatch, onEdgesChange, nodes, edges, isConnected]
-  );
+    }
+  }, [id, onEdgesChange, activeFlowchart, dispatch, activeFlowchartKey]);
+  
+  // Handle new connections
+  const onConnect = useCallback((connection: Connection) => {
+    // Generate a unique ID for the edge
+    const edgeId = `edge-${uuidv4()}`;
+    const newEdge: Edge = {
+      ...connection,
+      id: edgeId,
+      type: 'custom',
+      animated: false,
+      source: connection.source || '',
+      target: connection.target || ''
+    };
+    
+    // Add the edge to the local state
+    setEdges(eds => addEdge(newEdge, eds));
+    
+    // If this is a shared flowchart, broadcast the new edge
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
+      console.log('Broadcasting new edge:', newEdge);
+      
+      // Send new edge to peers
+      webRTCService.sendFlowchartUpdate({
+        edgeOperation: {
+          type: 'add',
+          edge: newEdge
+        }
+      });
+    } else {
+      // Regular non-collaborative flowchart
+      if (id && activeFlowchart) {
+        const change: {type: 'add'; item: Edge} = {
+          type: 'add', 
+          item: newEdge
+        };
+        dispatch(updateEdges({ id, changes: [change] }));
+      }
+    }
+  }, [setEdges, id, activeFlowchart, dispatch, activeFlowchartKey]);
   
   // Handle selection changes
   const handleSelectionChange = useCallback(
@@ -326,47 +363,6 @@ const FlowchartEditor: React.FC = () => {
       );
     },
     [dispatch]
-  );
-  
-  // Handle edge connections
-  const handleConnect = useCallback(
-    (connection: Connection) => {
-      // Ensure the connection is complete before creating the edge
-      if (id && connection.source && connection.target) {
-        const newEdge: Edge = {
-          id: `edge_${uuidv4()}`, // Generate unique ID with static prefix
-          source: connection.source, // Now guaranteed non-null
-          target: connection.target, // Now guaranteed non-null
-          sourceHandle: connection.sourceHandle,
-          targetHandle: connection.targetHandle,
-          type: 'custom',
-          animated: false,
-          data: {},
-        };
-
-        const change: FlowChanges = {
-          nodeChanges: [],
-          edgeChanges: [
-            {
-              type: 'add',
-              item: newEdge,
-            },
-          ],
-        };
-
-        dispatch(applyChanges({ id, changes: change }));
-        
-        // Update collaborative state if connected
-        if (id.startsWith('shared-') && isConnected) {
-          const updatedEdges = [...edges, newEdge];
-          yjsService.updateFlowchart({
-            nodes,
-            edges: updatedEdges
-          });
-        }
-      }
-    },
-    [id, dispatch, nodes, edges, isConnected]
   );
   
   // Handle drag over for the ReactFlow area
@@ -515,7 +511,7 @@ const FlowchartEditor: React.FC = () => {
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
-            onConnect={handleConnect}
+            onConnect={onConnect}
             onSelectionChange={handleSelectionChange}
             onInit={setReactFlowInstance}
             onDrop={onDrop}
