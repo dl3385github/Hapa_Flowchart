@@ -8,10 +8,11 @@ import {
   setSignalingError,
   setActiveFlowchartKey
 } from '../store/slices/collaborationSlice';
+import * as crypto from 'crypto-browserify';
 
-// More reliable key generation (we'll simulate Hypercore keys with this)
+// Generate real Hypercore-compatible keys
 const generateHypercoreKey = () => {
-  // Generate a consistent key format similar to Hypercore
+  // Generate a 32-byte random key (compatible with Hypercore format)
   const key = new Uint8Array(32);
   window.crypto.getRandomValues(key);
   return Array.from(key)
@@ -112,8 +113,7 @@ class WebRTCService {
         store.dispatch(setLocalPeerId(this.localPeerId));
       }
       
-      // Set up direct P2P connection using Hyperswarm for signaling
-      // This approach doesn't rely on external signaling servers
+      // Set up direct P2P connection using WebRTC with signaling
       await this.initializeDirectP2P();
       
       return this.localPeerId;
@@ -124,131 +124,19 @@ class WebRTCService {
     }
   }
 
-  // Initialize direct P2P connection using Hyperswarm for discovery
+  // Initialize direct P2P connection using WebRTC with signaling
   private async initializeDirectP2P(): Promise<void> {
     try {
-      console.log('Initializing direct P2P connection using Hyperswarm...');
+      console.log('Initializing direct P2P connection using WebRTC...');
       
-      // In a real implementation, this would use the actual Hyperswarm library
-      // For now, we'll simulate the connection to demonstrate the flow
-      
-      // First try to connect to signaling servers
-      try {
-        await this.connectToSignalingServer();
-        console.log('Direct P2P connection initialized using signaling server');
-        return;
-      } catch (signalingError) {
-        console.warn('Failed to connect to any signaling servers, falling back to local implementation:', signalingError);
-      }
-      
-      // If signaling servers are unavailable, fall back to local implementation
-      console.log('Using local fallback for WebRTC signaling');
-      await this.initializeLocalFallback();
-      
-      console.log('Direct P2P connection initialized successfully using local fallback');
+      // Connect to signaling server for discovery and connection setup
+      await this.connectToSignalingServer();
+      console.log('Direct P2P connection initialized successfully');
     } catch (error) {
       console.error('Failed to initialize direct P2P connection:', error);
       throw error;
     }
   }
-  
-  // Initialize a local fallback implementation when no external signaling servers are available
-  private async initializeLocalFallback(): Promise<void> {
-    console.log('Initializing local WebRTC fallback...');
-    
-    // Create a simple in-memory signaling mechanism
-    // This only works for local testing but provides a fallback when external services are down
-    
-    // Register event handler for window message events (for local testing only)
-    window.addEventListener('message', this.handleLocalSignalingMessage);
-    
-    // Create mock signaling server state
-    this.signalingServer = {
-      readyState: WebSocket.OPEN,
-      send: (data: string) => {
-        try {
-          // Broadcast to all tabs in same origin (for local testing)
-          const message = JSON.parse(data);
-          
-          // Add timestamp to prevent duplicate processing
-          message._timestamp = Date.now();
-          message._source = 'local';
-          
-          // Use localStorage as a primitive broadcast channel
-          localStorage.setItem('hapa_flowchart_signal', JSON.stringify(message));
-          localStorage.removeItem('hapa_flowchart_signal');
-          
-          // Also dispatch using postMessage for same-tab communication
-          window.postMessage({
-            type: 'hapa_flowchart_signal',
-            data: message
-          }, window.location.origin);
-          
-          console.log('Local signaling message sent:', message.type);
-        } catch (err) {
-          console.error('Error sending local signaling message:', err);
-        }
-      },
-      close: () => {
-        window.removeEventListener('message', this.handleLocalSignalingMessage);
-        console.log('Local signaling closed');
-      },
-      // Stub implementations for TypeScript
-      onopen: null,
-      onclose: null,
-      onerror: null,
-      onmessage: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => true,
-      binaryType: 'blob' as BinaryType,
-      bufferedAmount: 0,
-      extensions: '',
-      protocol: '',
-      url: 'local://',
-      CONNECTING: WebSocket.CONNECTING,
-      OPEN: WebSocket.OPEN,
-      CLOSING: WebSocket.CLOSING,
-      CLOSED: WebSocket.CLOSED
-    } as unknown as WebSocket;
-    
-    // Setup storage listener for cross-tab communication
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'hapa_flowchart_signal' && event.newValue) {
-        try {
-          const message = JSON.parse(event.newValue);
-          
-          // Process the message
-          this.onSignalingMessage(message);
-          
-          // Clean up
-          localStorage.removeItem('hapa_flowchart_signal');
-        } catch (err) {
-          console.error('Error processing local storage signaling message:', err);
-        }
-      }
-    });
-    
-    console.log('Local WebRTC fallback initialized');
-    
-    // Dispatch connection status
-    store.dispatch(setConnectionStatus(true));
-  }
-  
-  // Handle local signaling messages (for the fallback implementation)
-  private handleLocalSignalingMessage = (event: MessageEvent) => {
-    // Only process our own messages
-    if (event.origin !== window.location.origin) return;
-    if (!event.data || event.data.type !== 'hapa_flowchart_signal') return;
-    
-    const message = event.data.data;
-    
-    // Skip our own messages
-    if (message.source === this.localPeerId) return;
-    
-    // Process the message
-    this.onSignalingMessage(message);
-  };
   
   // Get the local peer ID
   public getLocalPeerId(): string | null {
@@ -296,23 +184,18 @@ class WebRTCService {
           try {
             await this.initializeDirectP2P();
           } catch (error) {
-            console.error('Failed to reconnect to signaling server, but will continue with local key:', error);
+            console.error('Failed to reconnect to signaling server:', error);
+            throw error;
           }
         }
         
-        // Announce this flowchart in the discovery network if we have a signaling connection
-        if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
-          try {
-            this.signalingServer.send(JSON.stringify({
-              type: 'announce',
-              topic: this.hypercoreKey,
-              peerId: this.localPeerId
-            }));
-            console.log(`Announced existing flowchart with key ${this.hypercoreKey} in the network`);
-          } catch (error) {
-            console.error('Failed to announce flowchart, but continuing with local key:', error);
-          }
-        }
+        // Announce this flowchart in the WebRTC network
+        this.signalingServer.send(JSON.stringify({
+          type: 'announce',
+          topic: this.hypercoreKey,
+          peerId: this.localPeerId
+        }));
+        console.log(`Announced existing flowchart with key ${this.hypercoreKey} in the network`);
         
         // Track the currently connected flowchart ID
         this.connectedFlowchartId = flowchartId;
@@ -320,7 +203,7 @@ class WebRTCService {
         return this.hypercoreKey;
       }
       
-      // Generate a new Hypercore key for this flowchart
+      // Generate a new key for this flowchart
       this.hypercoreKey = generateHypercoreKey();
       
       // Store the association between flowchart ID and its key
@@ -340,50 +223,22 @@ class WebRTCService {
       // Ensure we're connected to a signaling server
       if (!this.signalingServer || this.signalingServer.readyState !== WebSocket.OPEN) {
         console.warn('Not connected to signaling server, attempting to reconnect...');
-        try {
-          await this.initializeDirectP2P();
-        } catch (error) {
-          console.error('Failed to reconnect to signaling server, but will continue with local key:', error);
-        }
+        await this.initializeDirectP2P();
       }
       
-      // Announce this flowchart in the discovery network if we have a signaling connection
-      if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
-        try {
-          this.signalingServer.send(JSON.stringify({
-            type: 'announce',
-            topic: this.hypercoreKey,
-            peerId: this.localPeerId
-          }));
-          console.log(`Announced new flowchart with key ${this.hypercoreKey} in the network`);
-        } catch (error) {
-          console.error('Failed to announce flowchart, but continuing with local key:', error);
-        }
-      }
+      // Announce this flowchart in the WebRTC network
+      this.signalingServer.send(JSON.stringify({
+        type: 'announce',
+        topic: this.hypercoreKey,
+        peerId: this.localPeerId
+      }));
+      console.log(`Announced new flowchart with key ${this.hypercoreKey} in the network`);
       
       return this.hypercoreKey;
     } catch (error) {
       console.error('Failed to create shared flowchart:', error);
-      
-      // Even if there's an error with the signaling service, still generate and return a key
-      // This allows the app to function in offline mode
-      if (!this.hypercoreKey) {
-        this.hypercoreKey = generateHypercoreKey();
-        console.log(`Generated offline key despite error: ${this.hypercoreKey}`);
-        
-        // Still store the offline key
-        if (flowchartId) {
-          this.flowchartKeys.set(flowchartId, this.hypercoreKey);
-          this.connectedFlowchartId = flowchartId;
-          this.saveStoredKeys();
-          store.dispatch(setActiveFlowchartKey(this.hypercoreKey));
-        }
-      }
-      
-      store.dispatch(setSignalingError('Warning: Connection issues detected. You may be in offline mode.'));
-      
-      // Still return the key so the app can function
-      return this.hypercoreKey;
+      store.dispatch(setSignalingError('Failed to create shared flowchart'));
+      throw error;
     }
   }
   
@@ -402,7 +257,7 @@ class WebRTCService {
   // Join an existing shared flowchart
   public async joinSharedFlowchart(hypercoreKey: string): Promise<boolean> {
     try {
-      console.log(`Joining flowchart with hypercore key: ${hypercoreKey}`);
+      console.log(`Joining flowchart with key: ${hypercoreKey}`);
       
       // First, cleanup any existing connections for other flowcharts
       if (this.hypercoreKey && this.hypercoreKey !== hypercoreKey) {
@@ -410,7 +265,7 @@ class WebRTCService {
         this.cleanup();
       }
       
-      // Set the new hypercore key
+      // Set the new key
       this.hypercoreKey = hypercoreKey;
       
       // Create a temporary ID for the joined flowchart
@@ -428,28 +283,10 @@ class WebRTCService {
       // Set the active flowchart key in Redux
       store.dispatch(setActiveFlowchartKey(hypercoreKey));
       
-      // Check if we're connected to the signaling server
-      let connectedToSignalingServer = false;
-      
+      // Ensure we're connected to the signaling server
       if (!this.signalingServer || this.signalingServer.readyState !== WebSocket.OPEN) {
         console.log('Not connected to signaling server, attempting to connect...');
-        try {
-          await this.initializeDirectP2P();
-          if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
-            connectedToSignalingServer = true;
-          }
-        } catch (error) {
-          console.warn('Failed to connect to signaling server, using local fallback:', error);
-        }
-      } else {
-        connectedToSignalingServer = true;
-      }
-      
-      if (!connectedToSignalingServer) {
-        console.warn('Using local fallback for joining flowchart');
-        // We're using our local fallback, which should already be initialized
-        // Just update the connection status
-        store.dispatch(setConnectionStatus(true));
+        await this.initializeDirectP2P();
       }
       
       // Mark this flowchart key as pending a data request
@@ -458,51 +295,23 @@ class WebRTCService {
       // Set connection status to connecting
       store.dispatch(setConnectionStatus(true));
       
-      // Broadcast join message to discover peers with this hypercore key
-      if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
-        try {
-          this.signalingServer.send(JSON.stringify({
-            type: 'discover',
-            topic: hypercoreKey,
-            peerId: this.localPeerId
-          }));
-          console.log(`Broadcasting discovery message for flowchart key: ${hypercoreKey}`);
-        } catch (error) {
-          console.error('Failed to send discovery message:', error);
-        }
-      }
+      // Broadcast discovery message to find peers with this key
+      this.signalingServer.send(JSON.stringify({
+        type: 'discover',
+        topic: hypercoreKey,
+        peerId: this.localPeerId
+      }));
+      console.log(`Broadcasting discovery message for flowchart key: ${hypercoreKey}`);
       
       return true;
-    } catch (error: unknown) {
+    } catch (error) {
       console.error('Failed to join shared flowchart:', error);
-      
-      // Still create local data if possible
-      if (!this.hypercoreKey) {
-        this.hypercoreKey = hypercoreKey;
-        
-        // Create a temporary ID for the joined flowchart
-        const tempFlowchartId = `shared-${hypercoreKey.substring(0, 8)}`;
-        
-        // Store the association between the temporary ID and its key
-        this.flowchartKeys.set(tempFlowchartId, hypercoreKey);
-        this.connectedFlowchartId = tempFlowchartId;
-        this.saveStoredKeys();
-        
-        // Set the active flowchart key in Redux
-        store.dispatch(setActiveFlowchartKey(hypercoreKey));
-      }
-      
-      if (error instanceof Error) {
-        store.dispatch(setSignalingError('Warning: Connection issues detected. You may be in offline mode.'));
-      } else {
-        store.dispatch(setSignalingError('Failed to join flowchart'));
-      }
-      
+      store.dispatch(setSignalingError('Failed to join shared flowchart'));
       return false;
     }
   }
   
-  // Connect to the signaling server for real WebRTC connections
+  // Connect to the signaling server for WebRTC connections
   private async connectToSignalingServer(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
@@ -539,7 +348,7 @@ class WebRTCService {
           
           // Create new WebSocket connection
           const ws = new WebSocket(signalServerUrl);
-          
+            
           // Set timeout to handle connection failures
           const connectionTimeout = setTimeout(() => {
             console.log(`Connection to ${signalServerUrl} timed out`);
@@ -713,7 +522,7 @@ class WebRTCService {
   // Initiate a connection to a peer
   private async connectToPeer(peerId: string) {
     try {
-      console.log(`Initiating direct P2P connection to peer: ${peerId}`);
+      console.log(`Initiating WebRTC connection to peer: ${peerId}`);
       
       // Skip if we already have a connection to this peer
       if (this.peerConnections.has(peerId)) {
@@ -721,7 +530,7 @@ class WebRTCService {
         return;
       }
       
-      // Create a new RTCPeerConnection with improved ICE server configuration
+      // Create a new RTCPeerConnection with ICE server configuration
       const peerConnection = new RTCPeerConnection({
         iceServers: ICE_SERVERS,
         iceCandidatePoolSize: 10
@@ -790,7 +599,7 @@ class WebRTCService {
       });
       await peerConnection.setLocalDescription(offer);
       
-      // Send the offer via P2P network
+      // Send the offer via signaling server
       this.sendSignalingMessage({
         type: 'offer',
         source: this.localPeerId,
@@ -913,7 +722,7 @@ class WebRTCService {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       
-      // Send the answer via P2P network
+      // Send the answer via signaling server
       this.sendSignalingMessage({
         type: 'answer',
         source: this.localPeerId,
@@ -980,7 +789,7 @@ class WebRTCService {
         peerId,
         connection: 'connected'
       }));
-      
+
       // If we're sharing a flowchart, immediately inform the peer
       if (this.hypercoreKey && this.connectedFlowchartId) {
         console.log(`Informing peer ${peerId} about active flowchart: ${this.hypercoreKey}`);
@@ -988,7 +797,7 @@ class WebRTCService {
           type: 'active-flowchart',
           flowchartKey: this.hypercoreKey
         });
-        
+
         // If we're the host/source of the flowchart, send the current data
         const state = store.getState();
         if (this.connectedFlowchartId && state.flowcharts.items[this.connectedFlowchartId]) {
@@ -997,7 +806,7 @@ class WebRTCService {
           
           // Ensure we're sending valid data
           if (flowchart.nodes && flowchart.edges) {
-            this.sendToPeer(peerId, {
+        this.sendToPeer(peerId, {
               type: 'flowchart-data',
               flowchartKey: this.hypercoreKey,
               data: {
@@ -1020,10 +829,10 @@ class WebRTCService {
       // If we're joining and waiting for data, request it
       if (this.pendingDataRequests.has(this.hypercoreKey || '')) {
         console.log(`Requesting data for flowchart: ${this.hypercoreKey}`);
-        this.sendToPeer(peerId, {
-          type: 'request-flowchart',
-          flowchartKey: this.hypercoreKey
-        });
+          this.sendToPeer(peerId, {
+            type: 'request-flowchart',
+            flowchartKey: this.hypercoreKey
+          });
       }
     };
     
@@ -1194,7 +1003,7 @@ class WebRTCService {
         
         // Remove from pending requests
         if (message.flowchartKey) {
-          this.pendingDataRequests.delete(message.flowchartKey);
+        this.pendingDataRequests.delete(message.flowchartKey);
           
           // If we don't have a hypercore key yet, adopt this one
           if (!this.hypercoreKey) {
@@ -1261,7 +1070,7 @@ class WebRTCService {
     if (this.signalingServer && this.signalingServer.readyState === WebSocket.OPEN) {
       this.signalingServer.send(JSON.stringify(message));
     } else {
-      console.error('P2P messaging mechanism not available');
+      console.error('Signaling server not available');
     }
   }
   
@@ -1288,18 +1097,15 @@ class WebRTCService {
   }
   
   // Discover peers for a specific flowchart key
-  private simulateDiscoveredPeers(flowchartKey: string) {
+  private discoverPeers(flowchartKey: string) {
     console.log(`Finding peers for flowchart key: ${flowchartKey}`);
     
-    // In a real implementation, this would use Hyperswarm's topic-based discovery
-    // Here we're improving the simulation to better connect with specific peers
-    
     if (!this.signalingServer || this.signalingServer.readyState !== WebSocket.OPEN) {
-      console.error('P2P discovery network not available');
+      console.error('Signaling server not available');
       return;
     }
     
-    // Store this as our active hypercore key if not already set
+    // Store this as our active key if not already set
     if (!this.hypercoreKey) {
       this.hypercoreKey = flowchartKey;
       
@@ -1313,40 +1119,14 @@ class WebRTCService {
       store.dispatch(setActiveFlowchartKey(flowchartKey));
     }
     
-    // Send a message to announce our presence on this hypercore key
+    // Send a discovery message to find peers connected to this flowchart
     this.signalingServer.send(JSON.stringify({
-      type: 'announce',
-      flowchartKey: flowchartKey,
+      type: 'discover',
+      topic: flowchartKey,
       peerId: this.localPeerId
     }));
     
-    console.log(`Announced presence on hypercore key: ${flowchartKey}`);
-    
-    // Setup a dedicated handler for this flowchart
-    this.signalingServer.onmessage = (event: MessageEvent) => {
-      try {
-        const message = JSON.parse(event.data as string);
-        
-        // Only process messages for this specific flowchart key
-        if (message.flowchartKey === flowchartKey || !message.flowchartKey) {
-          if (message.type === 'peer-discovered') {
-            const { peerId, peerInfo } = message;
-            console.log(`Discovered peer for ${flowchartKey}: ${peerId}`);
-            
-            // Connect to the discovered peer
-            this.connectToPeer(peerId);
-            
-            // Update peer info in Redux
-            this.handlePeerJoined(peerId, peerInfo || {}, flowchartKey);
-          } else {
-            // Handle other message types
-            this.onSignalingMessage(message);
-          }
-        }
-      } catch (error) {
-        console.error('Error handling peer discovery message:', error);
-      }
-    };
+    console.log(`Sent discovery message for flowchart key: ${flowchartKey}`);
   }
   
   // Send a flowchart update to all connected peers
@@ -1432,19 +1212,11 @@ class WebRTCService {
     // Close signaling connection
     if (this.signalingServer) {
       try {
-        // Check if this is our local fallback implementation
-        if (this.signalingServer.url === 'local://') {
-          // Clean up event listeners for local fallback
-          window.removeEventListener('message', this.handleLocalSignalingMessage);
-          window.removeEventListener('storage', this.handleLocalStorageEvent);
-        } else {
-          // Real WebSocket cleanup
-          this.signalingServer.onopen = null;
-          this.signalingServer.onerror = null;
-          this.signalingServer.onclose = null;
-          this.signalingServer.onmessage = null;
-          this.signalingServer.close();
-        }
+        this.signalingServer.onopen = null;
+        this.signalingServer.onerror = null;
+        this.signalingServer.onclose = null;
+        this.signalingServer.onmessage = null;
+        this.signalingServer.close();
       } catch (e) {
         console.error('Error closing signaling connection:', e);
       }
@@ -1462,20 +1234,6 @@ class WebRTCService {
     
     console.log('WebRTC connections cleaned up');
   }
-
-  // Handle storage events for local signaling
-  private handleLocalStorageEvent = (event: StorageEvent) => {
-    if (event.key === 'hapa_flowchart_signal' && event.newValue) {
-      try {
-        const message = JSON.parse(event.newValue);
-        
-        // Process the message
-        this.onSignalingMessage(message);
-      } catch (err) {
-        console.error('Error processing local storage signaling message:', err);
-      }
-    }
-  };
 }
 
 // Create a singleton instance

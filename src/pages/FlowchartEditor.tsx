@@ -246,20 +246,20 @@ const FlowchartEditor: React.FC = () => {
   // Handle node changes
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // Apply the changes locally
-    onNodesChange(changes);
-    
+      onNodesChange(changes);
+      
     // If this is a shared flowchart, broadcast the changes
     if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting node changes:', changes);
       
-      changes.forEach(change => {
-        if (change.type === 'position' && change.position) {
+          changes.forEach(change => {
+            if (change.type === 'position' && change.position) {
           // Send node position update to peers
           webRTCService.sendFlowchartUpdate({
             nodeOperation: {
               type: 'move',
               id: change.id,
-              position: change.position
+                  position: change.position
             }
           });
         } else if (change.type === 'remove') {
@@ -284,14 +284,14 @@ const FlowchartEditor: React.FC = () => {
   // Handle edge changes
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     // Apply the changes locally
-    onEdgesChange(changes);
+      onEdgesChange(changes);
     
     // If this is a shared flowchart, broadcast the changes
     if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting edge changes:', changes);
       
-      changes.forEach(change => {
-        if (change.type === 'remove') {
+          changes.forEach(change => {
+            if (change.type === 'remove') {
           // Send edge deletion to peers
           webRTCService.sendFlowchartUpdate({
             edgeOperation: {
@@ -324,7 +324,7 @@ const FlowchartEditor: React.FC = () => {
     
     // Add the edge to the local state
     setEdges(eds => addEdge(newEdge, eds));
-    
+          
     // If this is a shared flowchart, broadcast the new edge
     if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting new edge:', newEdge);
@@ -335,7 +335,7 @@ const FlowchartEditor: React.FC = () => {
           type: 'add',
           edge: newEdge
         }
-      });
+          });
     } else {
       // Regular non-collaborative flowchart
       if (id && activeFlowchart) {
