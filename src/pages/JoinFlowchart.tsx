@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { HiOutlineArrowLeft, HiOutlineKey, HiOutlineRefresh } from 'react-icons/hi';
 import { setActiveFlowchartKey } from '../store/slices/collaborationSlice';
-import webRTCService from '../services/WebRTCService';
+import { p2pService } from '../services';
 import { RootState } from '../store';
 
 const JoinFlowchart: React.FC = () => {
@@ -18,14 +18,14 @@ const JoinFlowchart: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'retrying' | 'failed'>('idle');
   const { signalingError, isConnected } = useSelector((state: RootState) => state.collaboration);
   
-  // Initialize WebRTC service
+  // Initialize P2P service
   useEffect(() => {
     const initService = async () => {
       try {
-        await webRTCService.initialize();
-        console.log('WebRTC service initialized successfully');
+        await p2pService.initialize();
+        console.log('P2P service initialized successfully');
       } catch (err) {
-        console.error('Failed to initialize WebRTC service:', err);
+        console.error('Failed to initialize P2P service:', err);
         setError(t('webrtc_initialization_failed'));
       }
     };
@@ -35,7 +35,7 @@ const JoinFlowchart: React.FC = () => {
     // Cleanup on unmount
     return () => {
       if (isLoading) {
-        webRTCService.cleanup();
+        p2pService.cleanup();
       }
     };
   }, [t]);
@@ -82,8 +82,8 @@ const JoinFlowchart: React.FC = () => {
     try {
       console.log(`Attempting to join flowchart with key: ${hypercoreKey}`);
       
-      // Attempt to join the flowchart using WebRTC service
-      const success = await webRTCService.joinSharedFlowchart(hypercoreKey);
+      // Attempt to join the flowchart using P2P service
+      const success = await p2pService.joinSharedFlowchart(hypercoreKey);
       
       if (success) {
         // Set the active flowchart key in collaboration state
@@ -121,14 +121,14 @@ const JoinFlowchart: React.FC = () => {
     setError(null);
     
     // Clean up existing connections
-    webRTCService.cleanup();
+    p2pService.cleanup();
     
     // Reinitialize and try again
     try {
-      await webRTCService.initialize();
+      await p2pService.initialize();
       handleJoin();
     } catch (err) {
-      console.error('Failed to reinitialize WebRTC service:', err);
+      console.error('Failed to reinitialize P2P service:', err);
       setError(t('webrtc_initialization_failed'));
       setConnectionStatus('failed');
       setIsLoading(false);

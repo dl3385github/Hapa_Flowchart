@@ -19,7 +19,7 @@ import { toggleSidebar, togglePropertyPanel } from '../../../store/slices/uiSlic
 import { applyChanges } from '../../../store/slices/flowchartsSlice';
 import { FlowChanges } from '../../../types';
 import CollaboratorsList from './CollaboratorsList';
-import webRTCService from '../../../services/WebRTCService';
+import { p2pService } from '../../../services';
 
 interface FlowToolbarProps {
   flowchartId: string;
@@ -65,7 +65,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   useEffect(() => {
     if (isSharedFlowchart && !flowchartKey) {
       // Check if we already have a key for this flowchart
-      const existingKey = webRTCService.getFlowchartKey(flowchartId);
+      const existingKey = p2pService.getFlowchartKey(flowchartId);
       if (existingKey) {
         setFlowchartKey(existingKey);
       }
@@ -120,7 +120,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   const handleShare = async () => {
     // Generate or retrieve the flowchart key
     try {
-      const key = await webRTCService.createSharedFlowchart(flowchartId);
+      const key = await p2pService.createSharedFlowchart(flowchartId);
       setFlowchartKey(key);
       setSharingModalOpen(true);
     } catch (error) {
