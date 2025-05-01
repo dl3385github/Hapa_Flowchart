@@ -6,14 +6,19 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
     <div className="diamond-container">
       <div
         className={`diamond min-w-[120px] min-h-[120px] flex items-center justify-center transition-all 
-          bg-yellow-100 border-2 border-yellow-500 
-          dark:bg-yellow-800 dark:border-yellow-400
-          ${selected ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''
-        }`}
-        style={{ boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' }}
+          bg-yellow-100 border-2 ${selected ? 'border-yellow-600 dark:border-yellow-500' : 'border-yellow-500 dark:border-yellow-400'}
+          dark:bg-yellow-800 dark:bg-opacity-80
+          ${selected ? 'ring-4 ring-yellow-400 ring-opacity-60 dark:ring-yellow-500 dark:ring-opacity-50 transform scale-105' : ''}
+        `}
+        style={{ 
+          boxShadow: selected ? '0 8px 16px rgba(245, 158, 11, 0.3)' : '0 4px 6px rgba(0, 0, 0, 0.1)',
+          transition: 'all 0.2s ease'
+        }}
       >
         <div className="text-center p-2">
-          <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">{data.label}</div>
+          <div className={`font-medium text-sm ${selected ? 'text-yellow-700 dark:text-yellow-300' : 'text-gray-800 dark:text-gray-200'}`}>
+            {data.label}
+          </div>
         </div>
       </div>
 
@@ -21,7 +26,12 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
       <Handle
         type="target"
         position={Position.Top}
-        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
+        style={{ 
+          background: selected ? '#d97706' : '#EAB308', 
+          width: selected ? '12px' : '10px', 
+          height: selected ? '12px' : '10px', 
+          border: '2px solid white' 
+        }}
         isConnectable={isConnectable}
       />
       
@@ -29,7 +39,12 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Right}
         id="right"
-        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
+        style={{ 
+          background: selected ? '#d97706' : '#EAB308', 
+          width: selected ? '12px' : '10px', 
+          height: selected ? '12px' : '10px', 
+          border: '2px solid white' 
+        }}
         isConnectable={isConnectable}
       />
       
@@ -37,7 +52,12 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Bottom}
         id="bottom"
-        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
+        style={{ 
+          background: selected ? '#d97706' : '#EAB308', 
+          width: selected ? '12px' : '10px', 
+          height: selected ? '12px' : '10px', 
+          border: '2px solid white' 
+        }}
         isConnectable={isConnectable}
       />
       
@@ -45,7 +65,12 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
         type="source"
         position={Position.Left}
         id="left"
-        style={{ background: '#EAB308', width: '10px', height: '10px', border: '2px solid white' }}
+        style={{ 
+          background: selected ? '#d97706' : '#EAB308', 
+          width: selected ? '12px' : '10px', 
+          height: selected ? '12px' : '10px', 
+          border: '2px solid white' 
+        }}
         isConnectable={isConnectable}
       />
       
@@ -59,6 +84,15 @@ const DecisionNode: React.FC<NodeProps> = ({ data, isConnectable, selected }) =>
             {data.bottomLabel || 'No'}
           </div>
         </>
+      )}
+      
+      {/* Selection indicator */}
+      {selected && (
+        <div className="absolute -top-3 -right-3 z-10">
+          <div className="bg-yellow-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-md">
+            ✓
+          </div>
+        </div>
       )}
     </div>
   );
