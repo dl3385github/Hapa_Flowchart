@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "build:pwa": "vite build && workbox-cli generateSW workbox-config.js",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css,md}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,md}\"",
+    "bootstrap-server": "node scripts/hyperswarm-bootstrap-server.js"
   },
   "dependencies": {
     "@headlessui/react": "^1.7.17",

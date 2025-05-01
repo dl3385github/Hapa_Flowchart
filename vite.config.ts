@@ -7,6 +7,16 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 export default defineConfig({
   plugins: [
     react(),
+    // Add Node.js polyfills for crypto and other modules
+    nodePolyfills({
+      // Whether to polyfill specific globals (default: `{ process: true, Buffer: true }`)
+      globals: {
+        process: true,
+        Buffer: true,
+      },
+      // Whether to polyfill specific modules (default: `true` for all)
+      protocolImports: true,
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
@@ -36,34 +46,16 @@ export default defineConfig({
         ],
       },
     }),
-    nodePolyfills({
-      // To exclude specific polyfills, add them to this list.
-      exclude: [
-        'fs', // Excludes the polyfill for `fs` and `node:fs`.
-      ],
-      // Whether to polyfill specific globals.
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true,
-      },
-      // Whether to polyfill `node:` protocol imports.
-      protocolImports: true,
-    }),
   ],
   resolve: {
     alias: {
       // Add path aliases here if needed
       // '@': '/src',
-      // Crypto-related fallbacks
+      // Enable crypto-browserify polyfill
       crypto: 'crypto-browserify',
       stream: 'stream-browserify',
       assert: 'assert',
-      https: 'agent-base',
-      http: 'agent-base',
       path: 'path-browserify',
-      zlib: 'browserify-zlib',
-      util: 'util',
     },
   },
   server: {
@@ -79,5 +71,13 @@ export default defineConfig({
     target: 'esnext',
     sourcemap: true,
     chunkSizeWarningLimit: 1000,
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Enable Node.js specific features for browser
+      define: {
+        global: 'globalThis',
+      },
+    },
   },
 }); 

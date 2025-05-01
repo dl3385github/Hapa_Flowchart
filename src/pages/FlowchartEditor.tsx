@@ -29,7 +29,7 @@ import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../s
 import { setSelectedElements, clearSelection } from '../store/slices/uiSlice';
 import { updateLocalCursor } from '../store/slices/collaborationSlice';
 import { FlowChanges } from '../types';
-import { yjsService, p2pService } from '../services';
+import { yjsService, webRTCService } from '../services';
 
 // Components
 import EditorSidebar from '../components/flow/controls/EditorSidebar';
@@ -107,20 +107,19 @@ const FlowchartEditor: React.FC = () => {
         setInitializationError(null);
         
         try {
-          console.log('Initializing Yjs for flowchart:', id);
-          await yjsService.initialize();
-          await yjsService.setActiveFlowchart(id);
+          console.log('Initializing Yjs with document ID:', activeFlowchartKey);
+          await yjsService.initialize(activeFlowchartKey);
           
-          // Subscribe to flowchart updates
-          p2pService.onFlowchartUpdate((data) => {
-            console.log('Received flowchart update from P2P:', data);
-            
-            // If we have complete flowchart data (nodes and edges)
-            if (data.nodes && data.edges) {
+          // Subscribe to flowchart changes
+          yjsService.onFlowchartChanged(() => {
+            const flowchartData = yjsService.getFlowchartData();
+            if (flowchartData) {
+              console.log('Received flowchart update from Yjs:', flowchartData);
+              
               try {
                 // Validate nodes before setting them
-                const validNodes = Array.isArray(data.nodes) 
-                  ? data.nodes.filter((node: any) => {
+                const validNodes = Array.isArray(flowchartData.nodes) 
+                  ? flowchartData.nodes.filter((node: any) => {
                       return node && 
                         typeof node.id === 'string' && 
                         typeof node.type === 'string' && 
@@ -131,8 +130,8 @@ const FlowchartEditor: React.FC = () => {
                   : [];
                 
                 // Validate edges before setting them
-                const validEdges = Array.isArray(data.edges)
-                  ? data.edges.filter((edge: any) => {
+                const validEdges = Array.isArray(flowchartData.edges)
+                  ? flowchartData.edges.filter((edge: any) => {
                       return edge && 
                         typeof edge.id === 'string' && 
                         typeof edge.source === 'string' && 
@@ -145,39 +144,6 @@ const FlowchartEditor: React.FC = () => {
                 setEdges(validEdges);
               } catch (err) {
                 console.error('Error processing flowchart data:', err);
-              }
-            } 
-            // Handle individual node operations
-            else if (data.nodeOperation) {
-              const op = data.nodeOperation;
-              
-              if (op.type === 'move' && op.position) {
-                // Update node position
-                setNodes(nds => 
-                  nds.map(node => 
-                    node.id === op.id 
-                      ? { ...node, position: op.position } 
-                      : node
-                  )
-                );
-              } else if (op.type === 'delete') {
-                // Delete node
-                setNodes(nds => nds.filter(node => node.id !== op.id));
-              } else if (op.type === 'add' && op.node) {
-                // Add new node
-                setNodes(nds => [...nds, op.node]);
-              }
-            } 
-            // Handle individual edge operations
-            else if (data.edgeOperation) {
-              const op = data.edgeOperation;
-              
-              if (op.type === 'add' && op.edge) {
-                // Add new edge
-                setEdges(eds => [...eds, op.edge]);
-              } else if (op.type === 'delete') {
-                // Delete edge
-                setEdges(eds => eds.filter(edge => edge.id !== op.id));
               }
             }
           });
@@ -194,10 +160,9 @@ const FlowchartEditor: React.FC = () => {
     initializeYjs();
     
     return () => {
-      // Cleanup when component unmounts
+      // Cleanup Yjs when component unmounts
       if (id && id.startsWith('shared-')) {
         yjsService.cleanup();
-        p2pService.cleanup();
       }
     };
   }, [id, activeFlowchartKey, setNodes, setEdges]);
@@ -237,23 +202,20 @@ const FlowchartEditor: React.FC = () => {
   
   // Initialize collaborative flowchart when first loaded
   useEffect(() => {
-    const initializeCollaborativeFlowchart = async () => {
-      if (id && id.startsWith('shared-') && activeFlowchartKey && activeFlowchart) {
+    const initializeCollaborativeFlowchart = () => {
+      if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && activeFlowchart) {
         // If this is a shared flowchart and we're the first to create it, initialize with our data
         if (activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) {
           console.log('Initializing collaborative flowchart with local data');
           
-          await p2pService.createSharedFlowchart(id);
-          
-          // Update P2P with the flowchart data
-          p2pService.sendFlowchartUpdate({
+          yjsService.updateFlowchart({
+            properties: { id: activeFlowchart.id, name: activeFlowchart.name },
             nodes: activeFlowchart.nodes,
             edges: activeFlowchart.edges
           });
         } else {
           // If we're joining an existing flowchart, request data from peers
           console.log('Requesting collaborative flowchart data from peers');
-          await p2pService.joinSharedFlowchart(activeFlowchartKey);
         }
       }
     };
@@ -277,40 +239,43 @@ const FlowchartEditor: React.FC = () => {
     // Update cursor position in Redux
     dispatch(updateLocalCursor({ x: position.x, y: position.y }));
     
-    // Broadcast cursor position via P2P
-    p2pService.sendCursorPosition(position.x, position.y);
+    // Broadcast cursor position via Yjs
+    yjsService.updateCursorPosition(position.x, position.y);
   }, [reactFlowInstance, isConnected, dispatch]);
   
   // Handle node changes
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // Apply the changes locally
-    onNodesChange(changes);
-    
+      onNodesChange(changes);
+      
     // If this is a shared flowchart, broadcast the changes
-    if (id && id.startsWith('shared-') && activeFlowchartKey) {
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting node changes:', changes);
       
-      changes.forEach(change => {
-        if (change.type === 'position' && change.position) {
+          changes.forEach(change => {
+            if (change.type === 'position' && change.position) {
           // Send node position update to peers
-          yjsService.handleNodeOperation(id, {
-            type: 'update',
-            node: {
+          webRTCService.sendFlowchartUpdate({
+            nodeOperation: {
+              type: 'move',
               id: change.id,
-              position: change.position
+                  position: change.position
             }
           });
         } else if (change.type === 'remove') {
           // Send node deletion to peers
-          yjsService.handleNodeOperation(id, {
-            type: 'delete',
-            nodeId: change.id
+          webRTCService.sendFlowchartUpdate({
+            nodeOperation: {
+              type: 'delete',
+              id: change.id
+            }
           });
         }
       });
     } else {
       // Regular non-collaborative flowchart
       if (id && activeFlowchart) {
+        const updatedNodes = applyNodeChanges(changes, activeFlowchart.nodes);
         dispatch(updateNodes({ id, changes }));
       }
     }
@@ -319,18 +284,20 @@ const FlowchartEditor: React.FC = () => {
   // Handle edge changes
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     // Apply the changes locally
-    onEdgesChange(changes);
+      onEdgesChange(changes);
     
     // If this is a shared flowchart, broadcast the changes
-    if (id && id.startsWith('shared-') && activeFlowchartKey) {
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting edge changes:', changes);
       
-      changes.forEach(change => {
-        if (change.type === 'remove') {
+          changes.forEach(change => {
+            if (change.type === 'remove') {
           // Send edge deletion to peers
-          yjsService.handleEdgeOperation(id, {
-            type: 'delete',
-            edgeId: change.id
+          webRTCService.sendFlowchartUpdate({
+            edgeOperation: {
+              type: 'delete',
+              id: change.id
+            }
           });
         }
       });
@@ -357,16 +324,18 @@ const FlowchartEditor: React.FC = () => {
     
     // Add the edge to the local state
     setEdges(eds => addEdge(newEdge, eds));
-    
+          
     // If this is a shared flowchart, broadcast the new edge
-    if (id && id.startsWith('shared-') && activeFlowchartKey) {
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
       console.log('Broadcasting new edge:', newEdge);
       
       // Send new edge to peers
-      yjsService.handleEdgeOperation(id, {
-        type: 'add',
-        edge: newEdge
-      });
+      webRTCService.sendFlowchartUpdate({
+        edgeOperation: {
+          type: 'add',
+          edge: newEdge
+        }
+          });
     } else {
       // Regular non-collaborative flowchart
       if (id && activeFlowchart) {
@@ -463,7 +432,7 @@ const FlowchartEditor: React.FC = () => {
         // Update collaborative state if connected
         if (id.startsWith('shared-') && isConnected) {
           const updatedNodes = [...nodes, newNode];
-          yjsService.updateFlowchartData(id, {
+          yjsService.updateFlowchart({
             nodes: updatedNodes,
             edges
           });
@@ -486,40 +455,6 @@ const FlowchartEditor: React.FC = () => {
     // Implementation for property panel
     console.log('Edge property changed:', edgeId, data);
   }, []);
-
-  // Handle add node from drop
-  const onNodeAdd = useCallback((nodeType: string, position: { x: number; y: number }) => {
-    // Create new node
-    const newNode: Node = {
-      id: `node-${uuidv4()}`,
-      type: nodeType,
-      position,
-      data: { label: t(`node_type_${nodeType}`) }
-    };
-    
-    // Add the node to the local state
-    setNodes(nds => [...nds, newNode]);
-    
-    // If this is a shared flowchart, broadcast the new node
-    if (id && id.startsWith('shared-') && activeFlowchartKey) {
-      console.log('Broadcasting new node:', newNode);
-      
-      // Send new node to peers
-      yjsService.handleNodeOperation(id, {
-        type: 'add',
-        node: newNode
-      });
-    } else {
-      // Regular non-collaborative flowchart
-      if (id && activeFlowchart) {
-        const change: {type: 'add'; item: Node} = {
-          type: 'add',
-          item: newNode
-        };
-        dispatch(updateNodes({ id, changes: [change] }));
-      }
-    }
-  }, [setNodes, id, activeFlowchart, dispatch, activeFlowchartKey, t]);
 
   // Render loading state
   if (isInitializing) {

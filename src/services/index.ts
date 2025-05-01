@@ -1,18 +1,15 @@
 import webRTCService from './WebRTCService';
+import hyperswarmWebRTCService from './HyperswarmWebRTCService';
 import yjsService from './YjsService';
-import p2pService from './P2PService';
+
+// Choose which WebRTC service to use - we now use Hyperswarm for real P2P discovery
+const activeWebRTCService = hyperswarmWebRTCService;
 
 // Initialize services when this file is imported
 const initializeServices = async () => {
   try {
     console.log('Initializing services...');
-    
-    // Initialize P2P service first
-    await p2pService.initialize();
-    
-    // For backward compatibility
-    await webRTCService.initialize();
-    
+    await activeWebRTCService.initialize();
     // YjsService will be initialized when a document is opened
     console.log('Services initialized successfully');
   } catch (error) {
@@ -23,8 +20,8 @@ const initializeServices = async () => {
 // Initialize in background without blocking
 initializeServices();
 
+// Export the active WebRTC service as webRTCService for backward compatibility
 export { 
-  webRTCService,
-  yjsService,
-  p2pService
+  activeWebRTCService as webRTCService,
+  yjsService
 }; 

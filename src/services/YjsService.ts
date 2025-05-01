@@ -2,363 +2,503 @@ import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { store } from '../store';
 import { 
-  createFlowchart, 
-  updateNodes, 
-  updateEdges,
-  importFlowchart,
-  deleteFlowchart,
-  setActiveFlowchart,
-  applyChanges
-} from '../store/slices/flowchartsSlice';
-import { NodeChange, EdgeChange } from 'reactflow';
-import p2pService from './P2PService';
+  setCollaborativeDocument, 
+  setLocalAwareness,
+  updatePeer,
+  setConnectionStatus
+} from '../store/slices/collaborationSlice';
+import webRTCService from './WebRTCService';
+
+interface UserInfo {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface AwarenessState {
+  user: UserInfo;
+  cursor: { x: number; y: number } | null;
+}
 
 class YjsService {
-  private docs: Map<string, Y.Doc> = new Map();
-  private indexeddbProviders: Map<string, IndexeddbPersistence> = new Map();
-  private activeFlowchartId: string | null = null;
+  private ydoc: Y.Doc | null = null;
+  private indexeddbProvider: IndexeddbPersistence | null = null;
+  private flowchartData: Y.Map<any> | null = null;
+  private nodesData: Y.Array<any> | null = null;
+  private edgesData: Y.Array<any> | null = null;
+  private documentId: string | null = null;
+  private connectionAttempts: number = 0;
+  private maxConnectionAttempts: number = 3;
   private initialized: boolean = false;
-  
-  // Initialize the service
-  public async initialize(): Promise<void> {
-    if (this.initialized) return;
-    
-    // Subscribe to Redux store changes
-    store.subscribe(() => {
-      // Process changes from Redux store to Y.js
-      this.processReduxChanges();
-    });
-    
-    console.log('YjsService initialized');
-    this.initialized = true;
-  }
-  
-  // Load or create a document for a flowchart
-  public async getFlowchartDoc(flowchartId: string): Promise<Y.Doc> {
-    if (this.docs.has(flowchartId)) {
-      return this.docs.get(flowchartId)!;
+
+  // Initialize the Yjs document with a given ID
+  public async initialize(documentId: string): Promise<void> {
+    if (this.ydoc && this.documentId === documentId && this.initialized) {
+      // Already initialized with this document
+      return;
     }
-    
-    // Create a new Y.js document
-    const doc = new Y.Doc();
-    
-    // Store the document
-    this.docs.set(flowchartId, doc);
-    
-    // Create indexeddb persistence
-    const indexeddbProvider = new IndexeddbPersistence(`flowchart-${flowchartId}`, doc);
-    this.indexeddbProviders.set(flowchartId, indexeddbProvider);
-    
-    // Initialize the document with empty data if it's new
-    indexeddbProvider.on('synced', () => {
-      console.log(`IndexedDB provider synced for flowchart ${flowchartId}`);
-      
-      // Get the shared data
-      const nodes = doc.getArray('nodes');
-      const edges = doc.getArray('edges');
-      
-      // Check if we have data in the document
-      if (nodes.length === 0 && edges.length === 0) {
-        console.log('No data in IndexedDB, initializing with empty arrays');
-        
-        // Nothing to do, the document is already empty
-      } else {
-        console.log(`Loaded ${nodes.length} nodes and ${edges.length} edges from IndexedDB`);
-        
-        // Update Redux store with the loaded data
-        const flowchartData = {
-          id: flowchartId,
-          name: flowchartId,
-          description: '',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          version: 1,
-          public: false,
-          nodes: Array.from(nodes.toJSON()),
-          edges: Array.from(edges.toJSON())
-        };
-        
-        store.dispatch(importFlowchart(flowchartData));
-      }
-    });
-    
-    // Set up document change handlers
-    this.setupChangeHandlers(doc, flowchartId);
-    
-    return doc;
-  }
-  
-  // Set the active flowchart
-  public async setActiveFlowchart(flowchartId: string): Promise<void> {
-    console.log(`Setting active flowchart to ${flowchartId}`);
-    
-    this.activeFlowchartId = flowchartId;
-    
-    // Load or create the document
-    const doc = await this.getFlowchartDoc(flowchartId);
-    
-    // Subscribe to document changes from P2PService
-    p2pService.onFlowchartUpdate((data) => {
-      console.log('Received flowchart update from P2PService:', data);
-      this.handleFlowchartUpdate(flowchartId, data);
-    });
-  }
-  
-  // Handle flowchart update from P2PService
-  private handleFlowchartUpdate(flowchartId: string, data: any): void {
+
+    // Clean up previous document if any
+    this.cleanup();
+
     try {
-      if (!this.docs.has(flowchartId)) {
-        console.error(`Document for flowchart ${flowchartId} not found`);
-        return;
+      this.documentId = documentId;
+      this.connectionAttempts = 0;
+
+      // Create a new Yjs document
+      this.ydoc = new Y.Doc();
+
+      // Initialize data structures
+      this.flowchartData = this.ydoc.getMap('flowchart');
+      this.nodesData = this.ydoc.getArray('nodes');
+      this.edgesData = this.ydoc.getArray('edges');
+
+      // Use direct P2P communication through our custom WebRTC implementation
+      // instead of relying on Y-js WebRTC provider with external signaling servers
+      await this.initializeDirectP2P(documentId);
+
+      // Set up persistence with IndexedDB for offline capabilities
+      this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
+      
+      // Wait for IndexedDB to load data (if any exists)
+      await new Promise<void>((resolve) => {
+        if (this.indexeddbProvider) {
+          this.indexeddbProvider.on('synced', () => {
+            console.log('IndexedDB data loaded');
+            resolve();
+          });
+          
+          // Timeout after 1 second if synced doesn't happen
+          setTimeout(() => {
+            console.log('IndexedDB sync timeout');
+            resolve();
+          }, 1000);
+        } else {
+          resolve();
+        }
+      });
+
+      // Store only the document ID in Redux, not the Yjs document itself
+      store.dispatch(setCollaborativeDocument({
+        documentId
+      }));
+      
+      // Mark the service as initialized
+      this.initialized = true;
+
+      console.log('Yjs initialized with document ID:', documentId);
+    } catch (error) {
+      console.error('Failed to initialize Yjs:', error);
+      this.cleanup();
+      throw error;
+    }
+  }
+
+  // Initialize direct P2P connection without external signaling servers
+  private async initializeDirectP2P(documentId: string): Promise<void> {
+    try {
+      console.log('Initializing direct P2P connection for document:', documentId);
+      
+      // Create local awareness state for this document
+      this.setupLocalAwareness();
+
+      // Let WebRTCService handle all the direct P2P connections
+      // It will use Hyperswarm for peer discovery instead of external signaling servers
+      
+      // Mark as connected - P2P connections will be handled by WebRTCService
+      store.dispatch(setConnectionStatus(true));
+      
+      // Subscribe to document changes from WebRTCService
+      webRTCService.onFlowchartUpdate((data) => {
+        if (data && this.ydoc) {
+          console.log('Received flowchart update from WebRTCService:', data);
+          this.applyRemoteChanges(data);
+        }
+      });
+      
+      console.log('Direct P2P connection initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize direct P2P connection:', error);
+      if (this.connectionAttempts < this.maxConnectionAttempts) {
+        this.connectionAttempts++;
+        console.log(`Retrying connection (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
+        await this.initializeDirectP2P(documentId);
+      } else {
+        throw error;
       }
+    }
+  }
+
+  // Get the Yjs document (for components that need direct access)
+  public getYDoc(): Y.Doc | null {
+    return this.ydoc;
+  }
+
+  // Set up local awareness state without relying on WebRTC provider
+  private setupLocalAwareness(): void {
+    const localPeerId = webRTCService.getLocalPeerId() || 'unknown';
+    const userInfo = {
+      id: localPeerId,
+      name: 'User ' + localPeerId.substring(0, 6),
+      color: this.getRandomColor()
+    };
+    
+    // Store local awareness state
+    store.dispatch(setLocalAwareness({
+      user: userInfo,
+      cursor: null
+    }));
+    
+    // Let WebRTCService know about our user info
+    webRTCService.setLocalUserInfo(userInfo);
+  }
+
+  // Apply remote changes to local Yjs document
+  private applyRemoteChanges(data: any): void {
+    if (!this.ydoc) return;
+    
+    console.log('Applying remote changes to Yjs doc:', data);
+    
+    // Handle node operations (move, delete, add)
+    if (data.nodeOperation) {
+      const op = data.nodeOperation;
+      console.log('Applying node operation:', op);
       
-      const doc = this.docs.get(flowchartId)!;
+      // Get the current nodes from the document
+      const nodes = this.getFlowchartData()?.nodes || [];
       
-      // Handle different types of updates
-      if (data.nodeOperation) {
-        // Handle node operations
-        const op = data.nodeOperation;
-        
-        switch (op.type) {
-          case 'add':
-            // Add node to Redux store
-            const currState = store.getState().flowcharts.items[flowchartId];
-            if (currState) {
-              store.dispatch(updateNodes({
-                id: flowchartId,
-                changes: [{ type: 'add', item: op.node } as NodeChange]
-              }));
-            }
-            break;
-          case 'update':
-            // Update node position in Redux store
-            store.dispatch(updateNodes({
-              id: flowchartId,
-              changes: [{ 
-                type: 'position', 
-                id: op.node.id, 
-                position: op.node.position 
-              } as NodeChange]
-            }));
-            break;
-          case 'delete':
-            // Delete node in Redux store
-            store.dispatch(updateNodes({
-              id: flowchartId,
-              changes: [{ type: 'remove', id: op.nodeId } as NodeChange]
-            }));
-            break;
-        }
-      } else if (data.edgeOperation) {
-        // Handle edge operations
-        const op = data.edgeOperation;
-        
-        switch (op.type) {
-          case 'add':
-            // Add edge to Redux store
-            store.dispatch(updateEdges({
-              id: flowchartId,
-              changes: [{ type: 'add', item: op.edge } as EdgeChange]
-            }));
-            break;
-          case 'delete':
-            // Delete edge in Redux store
-            store.dispatch(updateEdges({
-              id: flowchartId,
-              changes: [{ type: 'remove', id: op.edgeId } as EdgeChange]
-            }));
-            break;
-        }
-      } else if (data.nodes && data.edges) {
-        // Full flowchart update
-        // Update the document with the received data
-        doc.transact(() => {
-          // Get or create shared data structures
-          const nodes = doc.getArray('nodes');
-          const edges = doc.getArray('edges');
-          
-          // Clear existing data
-          nodes.delete(0, nodes.length);
-          edges.delete(0, edges.length);
-          
-          // Add new nodes
-          for (const node of data.nodes) {
-            nodes.push([node]);
+      if (op.type === 'move') {
+        // Update the position of the node
+        const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              position: op.position
+            };
           }
-          
-          // Add new edges
-          for (const edge of data.edges) {
-            edges.push([edge]);
-          }
+          return node;
         });
         
-        // Update Redux store with full flowchart import
-        const flowchartData = {
-          id: flowchartId,
-          name: flowchartId,
-          description: '',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          version: 1,
-          public: false,
-          nodes: data.nodes,
-          edges: data.edges
-        };
-        
-        store.dispatch(importFlowchart(flowchartData));
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
       }
-    } catch (error) {
-      console.error('Error handling flowchart update:', error);
-    }
-  }
-  
-  // Process changes from Redux store to Y.js
-  private processReduxChanges(): void {
-    // This could be implemented to sync from Redux to Y.js if needed
-  }
-  
-  // Set up document change handlers
-  private setupChangeHandlers(doc: Y.Doc, flowchartId: string): void {
-    // Get shared data structures
-    const nodes = doc.getArray('nodes');
-    const edges = doc.getArray('edges');
-    
-    // Handle node changes
-    nodes.observe(event => {
-      // Don't process our own changes
-      if (event.transaction.local) return;
-      
-      console.log('Nodes changed in Y.js document:', event);
-      
-      // Update Redux store with the new nodes
-      const flowchart = store.getState().flowcharts.items[flowchartId];
-      if (flowchart) {
-        // Create node changes
-        const nodeChanges: NodeChange[] = Array.from(nodes.toJSON()).map(node => ({
-          type: 'add',
-          item: node
-        } as NodeChange));
+      else if (op.type === 'delete') {
+        // Remove the node
+        const updatedNodes = nodes.filter((node: {id: string}) => node.id !== op.id);
         
-        store.dispatch(updateNodes({
-          id: flowchartId,
-          changes: nodeChanges
-        }));
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+        
+        // Also remove any edges connected to this node
+        const edges = this.getFlowchartData()?.edges || [];
+        const updatedEdges = edges.filter((edge: {source: string; target: string}) => 
+          edge.source !== op.id && edge.target !== op.id
+        );
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'add') {
+        // Add the new node
+        const updatedNodes = [...nodes, op.node];
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      }
+      else if (op.type === 'update') {
+        // Update node properties
+        const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              ...op.data
+            };
+          }
+          return node;
+        });
+        
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
+      return;
+    }
+    
+    // Handle edge operations (create, delete)
+    if (data.edgeOperation) {
+      const op = data.edgeOperation;
+      console.log('Applying edge operation:', op);
+      
+      // Get the current edges from the document
+      const edges = this.getFlowchartData()?.edges || [];
+      
+      if (op.type === 'add') {
+        // Add the new edge
+        const updatedEdges = [...edges, op.edge];
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'delete') {
+        // Remove the edge
+        const updatedEdges = edges.filter((edge: {id: string}) => edge.id !== op.id);
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      else if (op.type === 'update') {
+        // Update edge properties
+        const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
+          if (edge.id === op.id) {
+            return {
+              ...edge,
+              ...op.data
+            };
+          }
+          return edge;
+        });
+        
+        // Update the document with the new edges
+        this.updateEdgesData(updatedEdges);
+      }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
+      return;
+    }
+    
+    // Handle complete flowchart updates
+    this.ydoc.transact(() => {
+      // Update properties
+      if (data.properties && this.flowchartData) {
+        Object.entries(data.properties).forEach(([key, value]) => {
+          this.flowchartData?.set(key, value);
+        });
+      }
+      
+      // Update nodes
+      if (data.nodes && this.nodesData) {
+        // Clear existing nodes
+        this.nodesData.delete(0, this.nodesData.length);
+        
+        // Add new nodes
+        if (Array.isArray(data.nodes)) {
+          data.nodes.forEach((node: any) => {
+            this.nodesData?.push([node]);
+          });
+        }
+      }
+      
+      // Update edges
+      if (data.edges && this.edgesData) {
+        // Clear existing edges
+        this.edgesData.delete(0, this.edgesData.length);
+        
+        // Add new edges
+        if (Array.isArray(data.edges)) {
+          data.edges.forEach((edge: any) => {
+            this.edgesData?.push([edge]);
+          });
+        }
       }
     });
     
-    // Handle edge changes
-    edges.observe(event => {
-      // Don't process our own changes
-      if (event.transaction.local) return;
+    // Notify subscribers
+    this.notifyFlowchartUpdated();
+  }
+  
+  // Utility method to update nodes data
+  private updateNodesData(nodes: Array<{id: string; type: string; position: {x: number; y: number}; [key: string]: any}>): void {
+    if (!this.ydoc || !this.nodesData) return;
+    
+    this.ydoc.transact(() => {
+      // Clear existing nodes
+      this.nodesData?.delete(0, this.nodesData.length);
       
-      console.log('Edges changed in Y.js document:', event);
-      
-      // Update Redux store with the new edges
-      const flowchart = store.getState().flowcharts.items[flowchartId];
-      if (flowchart) {
-        // Create edge changes
-        const edgeChanges: EdgeChange[] = Array.from(edges.toJSON()).map(edge => ({
-          type: 'add',
-          item: edge
-        } as EdgeChange));
-        
-        store.dispatch(updateEdges({
-          id: flowchartId,
-          changes: edgeChanges
-        }));
-      }
+      // Add new nodes
+      nodes.forEach(node => {
+        this.nodesData?.push([node]);
+      });
     });
   }
   
-  // Update nodes or edges in Y.js document
-  public updateFlowchartData(flowchartId: string, data: any): void {
-    try {
-      if (!this.docs.has(flowchartId)) {
-        console.error(`Document for flowchart ${flowchartId} not found`);
-        return;
+  // Utility method to update edges data
+  private updateEdgesData(edges: Array<{id: string; source: string; target: string; [key: string]: any}>): void {
+    if (!this.ydoc || !this.edgesData) return;
+    
+    this.ydoc.transact(() => {
+      // Clear existing edges
+      this.edgesData?.delete(0, this.edgesData.length);
+      
+      // Add new edges
+      edges.forEach(edge => {
+        this.edgesData?.push([edge]);
+      });
+    });
+  }
+
+  // Subscribe to changes in the Yjs document
+  private subscribeToChanges(): void {
+    if (!this.ydoc) return;
+
+    // Listen for flowchart data changes
+    this.flowchartData?.observe(event => {
+      console.log('Flowchart data changed:', event);
+      this.notifyFlowchartUpdated();
+    });
+
+    // Listen for node changes
+    this.nodesData?.observe(event => {
+      console.log('Nodes data changed:', event);
+      this.notifyFlowchartUpdated();
+    });
+
+    // Listen for edge changes
+    this.edgesData?.observe(event => {
+      console.log('Edges data changed:', event);
+      this.notifyFlowchartUpdated();
+    });
+  }
+
+  // Notify that the flowchart has been updated
+  private notifyFlowchartUpdated(): void {
+    // This would dispatch an action to update the flowchart in the Redux store
+    // or trigger a callback to update the UI
+    if (this.flowchartChangedCallback) {
+      const flowchartData = this.getFlowchartData();
+      console.log('Notifying flowchart updated:', flowchartData);
+      this.flowchartChangedCallback();
+    }
+  }
+
+  // Callback for flowchart changes
+  private flowchartChangedCallback: (() => void) | null = null;
+
+  // Set callback for flowchart changes
+  public onFlowchartChanged(callback: () => void): void {
+    this.flowchartChangedCallback = callback;
+    
+    // Subscribe to changes if not already
+    this.subscribeToChanges();
+    
+    // Trigger initial update if we have data
+    const flowchartData = this.getFlowchartData();
+    if (flowchartData && (flowchartData.nodes.length > 0 || flowchartData.edges.length > 0)) {
+      setTimeout(() => callback(), 100);
+    }
+  }
+
+  // Update cursor position
+  public updateCursorPosition(x: number, y: number): void {
+    // Send cursor position via WebRTCService
+    webRTCService.sendCursorPosition(x, y);
+    
+    // Update local awareness state in Redux
+    store.dispatch(setLocalAwareness({
+      user: store.getState().collaboration.localAwareness.user,
+      cursor: { x, y }
+    }));
+  }
+
+  // Update flowchart data
+  public updateFlowchart(data: any): void {
+    if (!this.ydoc) return;
+    
+    console.log('Updating flowchart data:', data);
+
+    // Apply changes to the Yjs data structures
+    this.ydoc?.transact(() => {
+      // Update general flowchart properties
+      if (data.properties) {
+        Object.entries(data.properties).forEach(([key, value]) => {
+          this.flowchartData?.set(key, value);
+        });
       }
-      
-      const doc = this.docs.get(flowchartId)!;
-      
-      doc.transact(() => {
-        // Get shared data structures
-        const nodes = doc.getArray('nodes');
-        const edges = doc.getArray('edges');
-        
-        // Update nodes if provided
-        if (data.nodes) {
-          // Clear existing nodes
-          nodes.delete(0, nodes.length);
-          
-          // Add new nodes
-          for (const node of data.nodes) {
-            nodes.push([node]);
-          }
-        }
-        
-        // Update edges if provided
-        if (data.edges) {
-          // Clear existing edges
-          edges.delete(0, edges.length);
-          
-          // Add new edges
-          for (const edge of data.edges) {
-            edges.push([edge]);
-          }
-        }
-      });
-      
-      // Send update via P2PService
-      p2pService.sendFlowchartUpdate(data);
-    } catch (error) {
-      console.error('Error updating flowchart data:', error);
-    }
+
+      // Update nodes
+      if (data.nodes) {
+        this.nodesData?.delete(0, this.nodesData.length);
+        data.nodes.forEach((node: any) => {
+          this.nodesData?.push([node]);
+        });
+      }
+
+      // Update edges
+      if (data.edges) {
+        this.edgesData?.delete(0, this.edgesData.length);
+        data.edges.forEach((edge: any) => {
+          this.edgesData?.push([edge]);
+        });
+      }
+    });
+
+    // Also update through WebRTC for P2P synchronization
+    webRTCService.sendFlowchartUpdate(data);
   }
-  
-  // Handle node operations
-  public handleNodeOperation(flowchartId: string, operation: any): void {
-    try {
-      // Send the operation via P2PService
-      p2pService.sendFlowchartUpdate({
-        nodeOperation: operation
-      });
-    } catch (error) {
-      console.error('Error handling node operation:', error);
+
+  // Get the current flowchart data
+  public getFlowchartData(): any {
+    if (!this.flowchartData || !this.nodesData || !this.edgesData) {
+      return null;
     }
-  }
-  
-  // Handle edge operations
-  public handleEdgeOperation(flowchartId: string, operation: any): void {
-    try {
-      // Send the operation via P2PService
-      p2pService.sendFlowchartUpdate({
-        edgeOperation: operation
-      });
-    } catch (error) {
-      console.error('Error handling edge operation:', error);
+
+    const data = {
+      properties: this.flowchartData.toJSON(),
+      nodes: this.nodesData.toArray(),
+      edges: this.edgesData.toArray()
+    };
+    
+    // Make sure nodes and edges are properly defined
+    if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      console.error('Invalid flowchart data structure:', data);
+      return {
+        properties: data.properties,
+        nodes: Array.isArray(data.nodes) ? data.nodes : [],
+        edges: Array.isArray(data.edges) ? data.edges : []
+      };
     }
+    
+    return data;
   }
-  
-  // Clean up resources
+
+  // Generate a random color for user identification
+  private getRandomColor(): string {
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA5A5',
+      '#A5FFD6', '#A5C8FF', '#FFA5E0', '#DEFF79'
+    ];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+
+  // Check if this service is initialized
+  public isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  // Clean up Yjs resources
   public cleanup(): void {
-    // Close all providers
-    this.indexeddbProviders.forEach(provider => {
-      provider.destroy();
-    });
-    
-    // Clear maps
-    this.docs.clear();
-    this.indexeddbProviders.clear();
-    
-    // Reset state
-    this.activeFlowchartId = null;
     this.initialized = false;
     
-    console.log('YjsService cleaned up');
+    if (this.indexeddbProvider) {
+      this.indexeddbProvider.destroy();
+      this.indexeddbProvider = null;
+    }
+
+    if (this.ydoc) {
+      this.ydoc.destroy();
+      this.ydoc = null;
+    }
+
+    this.flowchartData = null;
+    this.nodesData = null;
+    this.edgesData = null;
+    this.documentId = null;
+    this.flowchartChangedCallback = null;
   }
 }
 
-// Create a singleton instance
+// Export as a singleton
 const yjsService = new YjsService();
-
 export default yjsService; 

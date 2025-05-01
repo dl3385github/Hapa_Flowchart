@@ -74,6 +74,63 @@ Hapa Flowchart is a powerful, intuitive flowchart creation tool built with priva
 1. Use the toolbar to export your flowchart in various formats (SVG, PNG, JSON)
 2. Import existing flowcharts by uploading JSON files or connecting to a shared Hypercore key
 
+## Decentralized P2P Connection with Hyperswarm
+
+Hapa Flowchart now uses the Hyperswarm DHT (Distributed Hash Table) for true peer-to-peer discovery and WebRTC for direct connections between peers. This enables real-time collaboration on flowcharts without relying on central servers.
+
+### How It Works
+
+1. When a user creates or joins a flowchart, a unique key is generated or used.
+2. This key is used to discover other peers in the Hyperswarm DHT network.
+3. Once peers are discovered, WebRTC connections are established directly between them.
+4. Flowchart data and edits are shared directly between peers.
+
+### Running a Bootstrap Server
+
+For optimal performance in production, you should run your own bootstrap server:
+
+```bash
+# Install dependencies
+npm install
+
+# Run the bootstrap server (default port: 4977)
+npm run bootstrap-server
+
+# Run with a custom port
+npm run bootstrap-server -- --port 8000
+```
+
+The bootstrap server provides two services:
+- WebRTC signaling for peer discovery: `ws://your-server:4977/signal`
+- WebSocket proxy for DHT communication: `ws://your-server:4977/proxy`
+
+### Configuring Bootstrap Servers
+
+To use your own bootstrap servers, modify the `BOOTSTRAP_SERVERS` array in `src/services/HyperswarmWebRTCService.ts`:
+
+```typescript
+const BOOTSTRAP_SERVERS = [
+  'ws://your-server:4977',  // Your primary bootstrap server
+  'ws://backup-server:4977', // Backup server
+  'wss://public-server.example.com' // Public bootstrap server with SSL
+];
+```
+
+For production use, it's recommended to:
+1. Run multiple bootstrap servers for redundancy
+2. Use secure WebSocket connections (wss://) with valid SSL certificates
+3. Deploy bootstrap servers in different geographic regions for better performance
+
+### Collaborative Editing
+
+When multiple users join the same flowchart (using the same key), they can edit it simultaneously:
+
+1. Each change is broadcast directly to all connected peers
+2. The Yjs CRDT algorithm handles conflict resolution automatically
+3. Users can see each other's cursor positions in real-time
+
+This decentralized approach ensures your flowcharts remain private and accessible even without internet access to central servers.
+
 ## Contributing
 
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
