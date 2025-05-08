@@ -12,6 +12,9 @@ import './styles/index.css';
 // Import services for initialization
 import './services';
 
+// Import the connection tester (for debugging)
+import './utils/connectionTester';
+
 // Initialize Sentry for error tracking in production only
 if (import.meta.env.PROD) {
   Sentry.init({

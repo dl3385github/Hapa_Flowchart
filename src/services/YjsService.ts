@@ -221,149 +221,156 @@ class YjsService {
           }
         }
       });
+    } else if (data.requestInitialData) {
+      // Someone is requesting the initial data, send it
+      console.log('Peer requested initial flowchart data');
       
-      // Notify subscribers
-      this.notifyFlowchartUpdated();
-      return;
-    }
-    
-    // Handle node operations (move, delete, add)
-    if (data.nodeOperation) {
-      const op = data.nodeOperation;
-      console.log('Applying node operation:', op);
-      
-      // Get the current nodes from the document
-      const nodes = this.getFlowchartData()?.nodes || [];
-      
-      if (op.type === 'move') {
-        // Update the position of the node
-        const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
-          if (node.id === op.id) {
-            return {
-              ...node,
-              position: op.position
-            };
+      const currentData = this.getFlowchartData();
+      if (currentData && (currentData.nodes?.length > 0 || currentData.edges?.length > 0)) {
+        console.log('Sending initial flowchart data in response to request:', currentData);
+        p2pService.sendFlowchartUpdate({
+          initialData: {
+            nodes: currentData.nodes,
+            edges: currentData.edges
           }
-          return node;
         });
-        
-        // Update the document with the new nodes
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'add') {
+      }
+    } else if (data.nodeOperation) {
+      // Handle node operations
+      console.log('Applying node operation:', data.nodeOperation);
+      
+      if (data.nodeOperation.type === 'add' && data.nodeOperation.node) {
         // Add a new node
-        const updatedNodes = [...nodes, op.node];
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'delete') {
-        // Remove a node
-        const updatedNodes = nodes.filter((node: {id: string; [key: string]: any}) => node.id !== op.id);
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'update') {
-        // Update a node's properties
-        const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
-          if (node.id === op.id) {
-            return {
-              ...node,
-              ...op.properties
-            };
+        const node = data.nodeOperation.node;
+        this.ydoc.transact(() => {
+          if (this.nodesData) {
+            // Check if the node already exists
+            const existingIndex = this.findNodeIndex(node.id);
+            if (existingIndex === -1) {
+              console.log('Adding new node:', node);
+              this.nodesData.push([node]);
+            } else {
+              console.log('Node already exists, not adding:', node.id);
+            }
           }
-          return node;
         });
-        this.updateNodesData(updatedNodes);
+      } else if (data.nodeOperation.type === 'move' && data.nodeOperation.id && data.nodeOperation.position) {
+        // Update node position
+        this.ydoc.transact(() => {
+          if (this.nodesData) {
+            const index = this.findNodeIndex(data.nodeOperation.id);
+            if (index !== -1) {
+              const node = this.nodesData.get(index);
+              node.position = data.nodeOperation.position;
+              this.nodesData.delete(index, 1);
+              this.nodesData.insert(index, [node]);
+              console.log('Updated node position:', data.nodeOperation.id, data.nodeOperation.position);
+            }
+          }
+        });
+      } else if (data.nodeOperation.type === 'update' && data.nodeOperation.id && data.nodeOperation.data) {
+        // Update node data
+        this.ydoc.transact(() => {
+          if (this.nodesData) {
+            const index = this.findNodeIndex(data.nodeOperation.id);
+            if (index !== -1) {
+              const node = this.nodesData.get(index);
+              node.data = { ...node.data, ...data.nodeOperation.data };
+              this.nodesData.delete(index, 1);
+              this.nodesData.insert(index, [node]);
+              console.log('Updated node data:', data.nodeOperation.id, data.nodeOperation.data);
+            }
+          }
+        });
+      } else if (data.nodeOperation.type === 'delete' && data.nodeOperation.id) {
+        // Delete a node
+        this.ydoc.transact(() => {
+          if (this.nodesData) {
+            const index = this.findNodeIndex(data.nodeOperation.id);
+            if (index !== -1) {
+              this.nodesData.delete(index, 1);
+              console.log('Deleted node:', data.nodeOperation.id);
+            }
+          }
+        });
       }
+    } else if (data.edgeOperation) {
+      // Handle edge operations
+      console.log('Applying edge operation:', data.edgeOperation);
       
-      // Notify subscribers
-      this.notifyFlowchartUpdated();
-      return;
-    }
-    
-    // Handle edge operations (add, delete, update)
-    if (data.edgeOperation) {
-      const op = data.edgeOperation;
-      console.log('Applying edge operation:', op);
-      
-      // Get the current edges from the document
-      const edges = this.getFlowchartData()?.edges || [];
-      
-      if (op.type === 'add') {
+      if (data.edgeOperation.type === 'add' && data.edgeOperation.edge) {
         // Add a new edge
-        const updatedEdges = [...edges, op.edge];
-        this.updateEdgesData(updatedEdges);
-      } else if (op.type === 'delete') {
-        // Remove an edge
-        const updatedEdges = edges.filter((edge: {id: string; [key: string]: any}) => edge.id !== op.id);
-        this.updateEdgesData(updatedEdges);
-      } else if (op.type === 'update') {
-        // Update an edge's properties
-        const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
-          if (edge.id === op.id) {
-            return {
-              ...edge,
-              ...op.properties
-            };
+        const edge = data.edgeOperation.edge;
+        this.ydoc.transact(() => {
+          if (this.edgesData) {
+            // Check if the edge already exists
+            const existingIndex = this.findEdgeIndex(edge.id);
+            if (existingIndex === -1) {
+              console.log('Adding new edge:', edge);
+              this.edgesData.push([edge]);
+            } else {
+              console.log('Edge already exists, not adding:', edge.id);
+            }
           }
-          return edge;
         });
-        this.updateEdgesData(updatedEdges);
+      } else if (data.edgeOperation.type === 'update' && data.edgeOperation.id && data.edgeOperation.data) {
+        // Update edge data
+        this.ydoc.transact(() => {
+          if (this.edgesData) {
+            const index = this.findEdgeIndex(data.edgeOperation.id);
+            if (index !== -1) {
+              const edge = this.edgesData.get(index);
+              edge.data = { ...edge.data, ...data.edgeOperation.data };
+              this.edgesData.delete(index, 1);
+              this.edgesData.insert(index, [edge]);
+              console.log('Updated edge data:', data.edgeOperation.id, data.edgeOperation.data);
+            }
+          }
+        });
+      } else if (data.edgeOperation.type === 'delete' && data.edgeOperation.id) {
+        // Delete an edge
+        this.ydoc.transact(() => {
+          if (this.edgesData) {
+            const index = this.findEdgeIndex(data.edgeOperation.id);
+            if (index !== -1) {
+              this.edgesData.delete(index, 1);
+              console.log('Deleted edge:', data.edgeOperation.id);
+            }
+          }
+        });
       }
-      
-      // Notify subscribers
-      this.notifyFlowchartUpdated();
-      return;
     }
     
-    // Handle complete flowchart update
-    if (data.nodes || data.edges) {
-      console.log('Applying complete flowchart update');
-      
-      // Update nodes if present
-      if (Array.isArray(data.nodes)) {
-        this.updateNodesData(data.nodes);
+    // Notify subscribers
+    this.notifyFlowchartUpdated();
+  }
+  
+  // Find the index of a node in the nodes array
+  private findNodeIndex(nodeId: string): number {
+    if (!this.nodesData) return -1;
+    
+    for (let i = 0; i < this.nodesData.length; i++) {
+      const node = this.nodesData.get(i);
+      if (node && node.id === nodeId) {
+        return i;
       }
-      
-      // Update edges if present
-      if (Array.isArray(data.edges)) {
-        this.updateEdgesData(data.edges);
-      }
-      
-      // Notify subscribers
-      this.notifyFlowchartUpdated();
     }
+    
+    return -1;
   }
   
-  // Update the nodes data in the Yjs document
-  private updateNodesData(nodes: Array<{id: string; type: string; position: {x: number; y: number}; [key: string]: any}>): void {
-    if (!this.ydoc || !this.nodesData || !this.flowchartData) return;
+  // Find the index of an edge in the edges array
+  private findEdgeIndex(edgeId: string): number {
+    if (!this.edgesData) return -1;
     
-    this.ydoc.transact(() => {
-      // Clear existing nodes
-      this.nodesData!.delete(0, this.nodesData!.length);
-      
-      // Add new nodes
-      nodes.forEach(node => {
-        this.nodesData!.push([node]);
-      });
-      
-      // Update in flowchart map
-      this.flowchartData!.set('nodes', nodes);
-    });
-  }
-  
-  // Update the edges data in the Yjs document
-  private updateEdgesData(edges: Array<{id: string; source: string; target: string; [key: string]: any}>): void {
-    if (!this.ydoc || !this.edgesData || !this.flowchartData) return;
+    for (let i = 0; i < this.edgesData.length; i++) {
+      const edge = this.edgesData.get(i);
+      if (edge && edge.id === edgeId) {
+        return i;
+      }
+    }
     
-    this.ydoc.transact(() => {
-      // Clear existing edges
-      this.edgesData!.delete(0, this.edgesData!.length);
-      
-      // Add new edges
-      edges.forEach(edge => {
-        this.edgesData!.push([edge]);
-      });
-      
-      // Update in flowchart map
-      this.flowchartData!.set('edges', edges);
-    });
+    return -1;
   }
   
   // Subscribe to changes in the Yjs document
@@ -412,84 +419,64 @@ class YjsService {
     p2pService.sendCursorPosition(x, y);
   }
   
-  // Update the flowchart
+  /**
+   * Update the flowchart with new data
+   * @param data The flowchart data to update
+   */
   public updateFlowchart(data: any): void {
-    if (!this.ydoc || !this.flowchartData) return;
+    if (!this.ydoc) return;
     
-    console.log('Updating flowchart in YjsService:', data);
+    console.log('Updating flowchart in Yjs:', data);
     
-    // Apply changes to the Yjs document
-    if (data.nodes || data.edges) {
-      // Update nodes if present
-      if (Array.isArray(data.nodes)) {
-        this.updateNodesData(data.nodes);
+    this.ydoc.transact(() => {
+      // Update properties if provided
+      if (data.properties && this.flowchartData) {
+        this.flowchartData.set('properties', data.properties);
       }
       
-      // Update edges if present
-      if (Array.isArray(data.edges)) {
-        this.updateEdgesData(data.edges);
+      // Update nodes if provided
+      if (Array.isArray(data.nodes) && this.nodesData) {
+        // Clear existing nodes
+        this.nodesData.delete(0, this.nodesData.length);
+        
+        // Add new nodes
+        data.nodes.forEach((node: any) => {
+          this.nodesData?.push([node]);
+        });
+        
+        // Also update in flowchart map
+        if (this.flowchartData) {
+          this.flowchartData.set('nodes', data.nodes);
+        }
       }
-    } else if (data.nodeOperation) {
-      // Handle node operations
-      const op = data.nodeOperation;
-      const nodes = this.getFlowchartData()?.nodes || [];
       
-      if (op.type === 'move') {
-        const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
-          if (node.id === op.id) {
-            return {
-              ...node,
-              position: op.position
-            };
-          }
-          return node;
+      // Update edges if provided
+      if (Array.isArray(data.edges) && this.edgesData) {
+        // Clear existing edges
+        this.edgesData.delete(0, this.edgesData.length);
+        
+        // Add new edges
+        data.edges.forEach((edge: any) => {
+          this.edgesData?.push([edge]);
         });
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'add') {
-        const updatedNodes = [...nodes, op.node];
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'delete') {
-        const updatedNodes = nodes.filter((node: {id: string; [key: string]: any}) => node.id !== op.id);
-        this.updateNodesData(updatedNodes);
-      } else if (op.type === 'update') {
-        const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
-          if (node.id === op.id) {
-            return {
-              ...node,
-              ...op.properties
-            };
-          }
-          return node;
-        });
-        this.updateNodesData(updatedNodes);
+        
+        // Also update in flowchart map
+        if (this.flowchartData) {
+          this.flowchartData.set('edges', data.edges);
+        }
       }
-    } else if (data.edgeOperation) {
-      // Handle edge operations
-      const op = data.edgeOperation;
-      const edges = this.getFlowchartData()?.edges || [];
-      
-      if (op.type === 'add') {
-        const updatedEdges = [...edges, op.edge];
-        this.updateEdgesData(updatedEdges);
-      } else if (op.type === 'delete') {
-        const updatedEdges = edges.filter((edge: {id: string; [key: string]: any}) => edge.id !== op.id);
-        this.updateEdgesData(updatedEdges);
-      } else if (op.type === 'update') {
-        const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
-          if (edge.id === op.id) {
-            return {
-              ...edge,
-              ...op.properties
-            };
-          }
-          return edge;
-        });
-        this.updateEdgesData(updatedEdges);
-      }
-    }
+    });
     
-    // Send update to peers
-    p2pService.sendFlowchartUpdate(data);
+    // Notify subscribers
+    this.notifyFlowchartUpdated();
+    
+    // Share with peers via P2P
+    p2pService.sendFlowchartUpdate({
+      initialData: {
+        nodes: data.nodes,
+        edges: data.edges
+      }
+    });
   }
   
   // Get the current flowchart data

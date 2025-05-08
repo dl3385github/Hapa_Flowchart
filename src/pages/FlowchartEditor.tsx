@@ -93,6 +93,7 @@ const FlowchartEditor: React.FC = () => {
   // Use refs to track initialization status and prevent effect loops
   const isInitializedRef = useRef<boolean>(false);
   const flowchartKeyRef = useRef<string | null>(null);
+  const initialDataSentRef = useRef(false);
   
   // Set active flowchart when ID changes
   useEffect(() => {
@@ -108,6 +109,7 @@ const FlowchartEditor: React.FC = () => {
       
       // Skip if we're already initialized with this key or currently initializing
       if (isInitializing || (isInitializedRef.current && flowchartKeyRef.current === activeFlowchartKey)) {
+        console.log('Skipping re-initialization of Yjs, already initialized or initializing');
         return;
       }
       
@@ -175,11 +177,11 @@ const FlowchartEditor: React.FC = () => {
     
     initializeYjs();
     
-    // Only clean up when component truly unmounts, not on every effect run
+    // Only clean up when component truly unmounts or a different flowchart is loaded
     return () => {
-      // We're only truly unmounting if the id changes
-      if (id !== undefined) {
-        console.log('Component unmounting, cleaning up Yjs...');
+      // Only clean up if we're changing to a different flowchart ID
+      if (id && flowchartKeyRef.current && flowchartKeyRef.current !== activeFlowchartKey) {
+        console.log('Cleaning up Yjs because flowchart changed from', flowchartKeyRef.current, 'to', activeFlowchartKey);
         yjsService.cleanup();
         isInitializedRef.current = false;
         flowchartKeyRef.current = null;
@@ -222,29 +224,53 @@ const FlowchartEditor: React.FC = () => {
   
   // Initialize collaborative flowchart when first loaded
   useEffect(() => {
-    const initializeCollaborativeFlowchart = () => {
-      if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && activeFlowchart) {
+    const initializeCollaborativeFlowchart = async () => {
+      // Wait for Yjs to be initialized first
+      if (!isInitializedRef.current || !yjsService.isInitialized()) {
+        console.log('Waiting for Yjs to initialize before setting up collaborative flowchart');
+        return;
+      }
+      
+      if (id && id.startsWith('shared-') && activeFlowchartKey && activeFlowchart) {
         // If this is a shared flowchart and we're the first to create it, initialize with our data
-        if (activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) {
+        if ((activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) && !initialDataSentRef.current) {
           console.log('Initializing collaborative flowchart with local data');
           
-          yjsService.updateFlowchart({
+          await yjsService.updateFlowchart({
             properties: { id: activeFlowchart.id, name: activeFlowchart.name },
             nodes: activeFlowchart.nodes,
             edges: activeFlowchart.edges
           });
-        } else {
+          
+          // Mark that we've sent the initial data
+          initialDataSentRef.current = true;
+        } else if (!initialDataSentRef.current) {
           // If we're joining an existing flowchart, request data from peers
           console.log('Requesting collaborative flowchart data from peers');
+          p2pService.sendFlowchartUpdate({ requestInitialData: true });
+          initialDataSentRef.current = true;
         }
       }
     };
     
-    // One-time initialization when the component mounts
-    if (isSharedFlowchart && activeFlowchartKey && activeFlowchart) {
+    // Only run this once when Yjs is initialized
+    if (isSharedFlowchart && activeFlowchartKey && activeFlowchart && yjsService.isInitialized()) {
       initializeCollaborativeFlowchart();
     }
-  }, [id, activeFlowchartKey, activeFlowchart, isSharedFlowchart]);
+  }, [id, activeFlowchartKey, activeFlowchart, isSharedFlowchart, yjsService.isInitialized()]);
+  
+  // Cleanup when component unmounts completely
+  useEffect(() => {
+    return () => {
+      // This will only run when the component is truly unmounting from the DOM
+      console.log('FlowchartEditor unmounting, cleaning up all services');
+      yjsService.cleanup();
+      p2pService.cleanup();
+      isInitializedRef.current = false;
+      flowchartKeyRef.current = null;
+      initialDataSentRef.current = false;
+    };
+  }, []);
   
   // Track mouse movement for cursor sharing
   const handleMouseMove = useCallback((event: React.MouseEvent) => {

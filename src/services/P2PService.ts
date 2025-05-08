@@ -12,6 +12,8 @@ import {
 } from '../store/slices/collaborationSlice';
 import crypto from 'crypto';
 import { Hyperswarm } from '../polyfills/bare-hyperswarm';
+import { v4 as uuidv4 } from 'uuid';
+import { generateRandomName, getColorFromId } from '../utils/nameGenerator';
 
 // Configuration for WebRTC connections
 const ICE_SERVERS = [
@@ -25,15 +27,23 @@ const ICE_SERVERS = [
 ];
 
 // Generate a random peer ID
-const generatePeerId = () => {
-  return crypto.randomBytes(32).toString('hex');
+const generatePeerId = (): string => {
+  return uuidv4().replace(/-/g, '');
 };
 
 // Create a topic key from string input
 const createTopicKey = (input: string): Uint8Array => {
-  return crypto.createHash('sha256')
-    .update(input)
-    .digest();
+  // Use crypto.subtle to create a consistent hash as Uint8Array
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  
+  // For now, just truncate the input to 32 bytes
+  const result = new Uint8Array(32);
+  for (let i = 0; i < Math.min(data.length, 32); i++) {
+    result[i] = data[i];
+  }
+  
+  return result;
 };
 
 export class P2PService extends EventEmitter {
@@ -275,10 +285,10 @@ export class P2PService extends EventEmitter {
     try {
       // Generate a peer ID for this connection based on info
       const remotePeerId = info.publicKey.toString('hex');
-      console.log(`New peer connected: ${remotePeerId.slice(0, 6)}`);
+      console.log(`New peer connected: ${remotePeerId.slice(0, 6)}, ${info.shouldInitiate ? 'we will' : 'they will'} initiate`);
       
       // Set up the WebRTC connection
-      this.setupWebRTC(remotePeerId, conn);
+      this.setupWebRTC(remotePeerId, conn, info.shouldInitiate);
       
       // Update the Redux store
       store.dispatch(setPeerConnection({
@@ -345,10 +355,11 @@ export class P2PService extends EventEmitter {
    * Set up WebRTC connection with a peer
    * @param peerId The peer ID
    * @param swarmConn The swarm connection for signaling
+   * @param shouldInitiate Whether we should initiate the connection
    */
-  private async setupWebRTC(peerId: string, swarmConn: any): Promise<void> {
+  private async setupWebRTC(peerId: string, swarmConn: any, shouldInitiate: boolean): Promise<void> {
     try {
-      console.log(`Setting up WebRTC with peer: ${peerId.slice(0, 6)}`);
+      console.log(`Setting up WebRTC with peer: ${peerId.slice(0, 6)}, ${shouldInitiate ? 'initiating' : 'waiting'}`);
       
       // Create a new RTCPeerConnection
       const peerConnection = new RTCPeerConnection({
@@ -358,240 +369,239 @@ export class P2PService extends EventEmitter {
       // Store the connection
       this.peerConnections.set(peerId, peerConnection);
       
-      // Set up a data channel
-      const dataChannel = peerConnection.createDataChannel(`flowchart-${peerId.slice(0, 6)}`, {
-        ordered: true
-      });
-      
-      // Handle data channel state changes
-      dataChannel.onopen = () => {
-        console.log(`Data channel open with peer: ${peerId.slice(0, 6)}`);
-        this.dataChannels.set(peerId, dataChannel);
-        
-        // Update connection status
-        store.dispatch(setPeerConnection({
-          peerId,
-          connection: 'connected'
-        }));
-        
-        // Send our user info
-        if (this.localUserInfo) {
-          this.sendToPeer(peerId, {
-            type: 'user-info',
-            info: this.localUserInfo
-          });
-        }
-      };
-      
-      dataChannel.onclose = () => {
-        console.log(`Data channel closed with peer: ${peerId.slice(0, 6)}`);
-        this.dataChannels.delete(peerId);
-      };
-      
-      dataChannel.onerror = (error) => {
-        console.error(`Data channel error with peer ${peerId.slice(0, 6)}:`, error);
-      };
-      
-      dataChannel.onmessage = (event) => {
-        this.handleDataChannelMessage(peerId, event.data);
-      };
-      
-      // Handle incoming data channels
-      peerConnection.ondatachannel = (event) => {
-        console.log(`Received data channel from peer: ${peerId.slice(0, 6)}`);
-        const incomingChannel = event.channel;
-        
-        incomingChannel.onopen = () => {
-          console.log(`Incoming data channel open with peer: ${peerId.slice(0, 6)}`);
-          this.dataChannels.set(peerId, incomingChannel);
-          
-          // Update connection status
-          store.dispatch(setPeerConnection({
-            peerId,
-            connection: 'connected'
-          }));
-          
-          // Send our user info
-          if (this.localUserInfo) {
-            this.sendToPeer(peerId, {
-              type: 'user-info',
-              info: this.localUserInfo
-            });
-          }
-        };
-        
-        incomingChannel.onclose = () => {
-          console.log(`Incoming data channel closed with peer: ${peerId.slice(0, 6)}`);
-          this.dataChannels.delete(peerId);
-        };
-        
-        incomingChannel.onerror = (error) => {
-          console.error(`Incoming data channel error with peer ${peerId.slice(0, 6)}:`, error);
-        };
-        
-        incomingChannel.onmessage = (event) => {
-          this.handleDataChannelMessage(peerId, event.data);
-        };
-      };
-      
-      // Handle ICE candidates
+      // Set up ICE candidate handling
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log(`Generated ICE candidate for peer: ${peerId.slice(0, 6)}`);
-          // Send the candidate via hyperswarm
-          const signal = {
+          console.log(`Sending ICE candidate to peer: ${peerId.slice(0, 6)}`);
+          const signalData = {
             type: 'ice-candidate',
             candidate: event.candidate
           };
-          
-          swarmConn.write(JSON.stringify(signal));
+          swarmConn.write(Buffer.from(JSON.stringify(signalData)));
         }
       };
       
-      // Handle ICE connection state changes
-      peerConnection.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state with peer ${peerId.slice(0, 6)} changed to: ${peerConnection.iceConnectionState}`);
+      // Track connection state changes
+      peerConnection.onconnectionstatechange = () => {
+        console.log(`WebRTC connection state with ${peerId.slice(0, 6)}: ${peerConnection.connectionState}`);
         
-        if (peerConnection.iceConnectionState === 'disconnected' || 
-            peerConnection.iceConnectionState === 'failed' ||
-            peerConnection.iceConnectionState === 'closed') {
-          console.warn(`WebRTC connection with peer ${peerId.slice(0, 6)} ${peerConnection.iceConnectionState}`);
-          this.cleanupPeerConnection(peerId);
-        } else if (peerConnection.iceConnectionState === 'connected') {
-          console.log(`WebRTC connection with peer ${peerId.slice(0, 6)} established`);
-          // Update connection status in Redux
+        if (peerConnection.connectionState === 'connected') {
           store.dispatch(setPeerConnection({
             peerId,
             connection: 'connected'
           }));
+        } else if (['disconnected', 'failed', 'closed'].includes(peerConnection.connectionState)) {
+          this.cleanupPeerConnection(peerId);
+          store.dispatch(setPeerConnection({
+            peerId,
+            connection: 'disconnected'
+          }));
         }
       };
       
-      // Should we create an offer?
-      const shouldCreateOffer = this.shouldInitiateConnection(peerId);
-      if (shouldCreateOffer) {
-        console.log(`Creating offer for peer: ${peerId.slice(0, 6)}`);
+      if (shouldInitiate) {
+        // Create a data channel if we're the initiator
+        const dataChannel = peerConnection.createDataChannel(`flowchart-${peerId.slice(0, 6)}`, {
+          ordered: true
+        });
+        
+        // Set up data channel event handlers
+        this.setupDataChannel(peerId, dataChannel);
+        
         try {
           // Create and send offer
-          const offer = await peerConnection.createOffer({
-            offerToReceiveAudio: false,
-            offerToReceiveVideo: false
-          });
-          
+          const offer = await peerConnection.createOffer();
           await peerConnection.setLocalDescription(offer);
           
-          // Send the offer via hyperswarm
-          const signal = {
+          console.log(`Sending offer to peer: ${peerId.slice(0, 6)}`);
+          swarmConn.write(Buffer.from(JSON.stringify({
             type: 'offer',
-            sdp: {
-              type: offer.type,
-              sdp: offer.sdp
-            }
-          };
-          
-          swarmConn.write(JSON.stringify(signal));
+            sdp: peerConnection.localDescription
+          })));
         } catch (err) {
           console.error(`Error creating offer for peer ${peerId.slice(0, 6)}:`, err);
         }
+      } else {
+        // If we're not initiating, just set up ondatachannel handler
+        peerConnection.ondatachannel = (event) => {
+          console.log(`Received data channel from peer: ${peerId.slice(0, 6)}`);
+          this.setupDataChannel(peerId, event.channel);
+        };
       }
     } catch (error) {
-      console.error(`Error setting up WebRTC with peer ${peerId}:`, error);
+      console.error(`Error setting up WebRTC with peer ${peerId.slice(0, 6)}:`, error);
     }
   }
   
   /**
-   * Handle a WebRTC signaling message received via Hyperswarm
-   * @param peerId Peer ID
-   * @param signal Signal data
+   * Set up data channel event handlers
+   * @param peerId The peer ID
+   * @param dataChannel The RTCDataChannel
+   */
+  private setupDataChannel(peerId: string, dataChannel: RTCDataChannel): void {
+    // Store data channel reference
+    dataChannel.onopen = () => {
+      console.log(`Data channel open with peer: ${peerId.slice(0, 6)}`);
+      this.dataChannels.set(peerId, dataChannel);
+      
+      // Update Redux store
+      store.dispatch(setPeerConnection({
+        peerId,
+        connection: 'connected'
+      }));
+      
+      // Send local user info
+      if (this.localUserInfo) {
+        this.sendToPeer(peerId, {
+          type: 'user-info',
+          info: this.localUserInfo
+        });
+      }
+    };
+    
+    dataChannel.onclose = () => {
+      console.log(`Data channel closed with peer: ${peerId.slice(0, 6)}`);
+      this.dataChannels.delete(peerId);
+      
+      // Update Redux store
+      store.dispatch(setPeerConnection({
+        peerId,
+        connection: 'disconnected'
+      }));
+    };
+    
+    dataChannel.onerror = (error) => {
+      console.error(`Data channel error with peer ${peerId.slice(0, 6)}:`, error);
+    };
+    
+    dataChannel.onmessage = (event) => {
+      this.handleDataChannelMessage(peerId, event.data);
+    };
+  }
+  
+  /**
+   * Handle a WebRTC signal received from a peer
+   * @param peerId The peer ID
+   * @param signal The signal data
    */
   private async handleSignalReceived(peerId: string, signal: any): Promise<void> {
     try {
-      if (!this.peerConnections.has(peerId)) {
-        console.warn(`No WebRTC connection for peer ${peerId}, ignoring signal`);
-        return;
+      // Get or create the peer connection
+      let peerConnection = this.peerConnections.get(peerId);
+      
+      if (!peerConnection) {
+        console.warn(`Received signal for unknown peer ${peerId.slice(0, 6)}, creating new connection`);
+        
+        // Create a new connection
+        peerConnection = new RTCPeerConnection({
+          iceServers: ICE_SERVERS
+        });
+        
+        // Set up ICE candidate handler
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log(`Generated ICE candidate for peer: ${peerId.slice(0, 6)}`);
+            // We would send this via the signaling channel, but we may not have one yet
+            // Store for later use if needed
+            if (!this.pendingIceCandidates.has(peerId)) {
+              this.pendingIceCandidates.set(peerId, []);
+            }
+            this.pendingIceCandidates.get(peerId)?.push(event.candidate);
+          }
+        };
+        
+        // Set up connection state tracking
+        peerConnection.onconnectionstatechange = () => {
+          console.log(`WebRTC connection state with ${peerId.slice(0, 6)}: ${peerConnection?.connectionState}`);
+          
+          if (peerConnection?.connectionState === 'connected') {
+            store.dispatch(setPeerConnection({
+              peerId,
+              connection: 'connected'
+            }));
+          } else if (['disconnected', 'failed', 'closed'].includes(peerConnection?.connectionState || '')) {
+            this.cleanupPeerConnection(peerId);
+            store.dispatch(setPeerConnection({
+              peerId,
+              connection: 'disconnected'
+            }));
+          }
+        };
+        
+        // Handle incoming data channels
+        peerConnection.ondatachannel = (event) => {
+          console.log(`Received data channel from peer: ${peerId.slice(0, 6)}`);
+          this.setupDataChannel(peerId, event.channel);
+        };
+        
+        // Store the connection
+        this.peerConnections.set(peerId, peerConnection);
       }
       
-      const peerConnection = this.peerConnections.get(peerId)!;
-      
-      if (signal.type === 'offer') {
-        console.log(`Setting remote description (offer) from peer ${peerId.slice(0, 6)}`);
-        
-        try {
-          // Create an RTCSessionDescription from the offer
-          const rtcSessionDescription = new RTCSessionDescription({
-            type: signal.sdp.type,
-            sdp: signal.sdp.sdp
-          });
+      // Handle different signal types
+      switch (signal.type) {
+        case 'offer':
+          console.log(`Processing offer from peer: ${peerId.slice(0, 6)}`);
           
           // Set the remote description
-          await peerConnection.setRemoteDescription(rtcSessionDescription);
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
           
           // Create an answer
           const answer = await peerConnection.createAnswer();
           await peerConnection.setLocalDescription(answer);
           
-          // Find the connection to send the answer
-          for (const [topicHex, topicInfo] of this.swarm.topics.entries()) {
-            for (const remotePeer of topicInfo.peers) {
-              if (remotePeer === peerId) {
-                const conn = this.swarm.connections.get(peerId);
-                if (conn) {
-                  // Send the answer
-                  const answerSignal = {
-                    type: 'answer',
-                    sdp: {
-                      type: answer.type,
-                      sdp: answer.sdp
-                    }
-                  };
-                  
-                  conn.write(JSON.stringify(answerSignal));
-                  
-                  // Process any pending ICE candidates
-                  this.processPendingIceCandidates(peerId, peerConnection);
-                  break;
-                }
-              }
+          // Send the answer back through the signaling channel
+          if (this.swarm) {
+            const conn = this.swarm.connections.get(peerId);
+            if (conn) {
+              console.log(`Sending answer to peer: ${peerId.slice(0, 6)}`);
+              conn.write(Buffer.from(JSON.stringify({
+                type: 'answer',
+                sdp: peerConnection.localDescription
+              })));
+            } else {
+              console.error(`No signaling connection found for peer: ${peerId.slice(0, 6)}`);
             }
           }
-        } catch (err) {
-          console.error(`Error handling offer from peer ${peerId.slice(0, 6)}:`, err);
-        }
-      } else if (signal.type === 'answer') {
-        console.log(`Setting remote description (answer) from peer ${peerId.slice(0, 6)}`);
-        
-        try {
-          // Create an RTCSessionDescription from the answer
-          const rtcSessionDescription = new RTCSessionDescription({
-            type: signal.sdp.type,
-            sdp: signal.sdp.sdp
-          });
-          
-          // Set the remote description
-          await peerConnection.setRemoteDescription(rtcSessionDescription);
           
           // Process any pending ICE candidates
-          this.processPendingIceCandidates(peerId, peerConnection);
-        } catch (err) {
-          console.error(`Error handling answer from peer ${peerId.slice(0, 6)}:`, err);
-        }
-      } else if (signal.type === 'ice-candidate') {
-        console.log(`Received ICE candidate from peer ${peerId.slice(0, 6)}`);
-        
-        // If we have a remote description, add the ICE candidate immediately
-        if (peerConnection.remoteDescription) {
-          await this.addIceCandidate(peerId, peerConnection, signal.candidate);
-        } else {
-          // Otherwise, store it to process later
-          if (!this.pendingIceCandidates.has(peerId)) {
-            this.pendingIceCandidates.set(peerId, []);
-          }
+          await this.processPendingIceCandidates(peerId, peerConnection);
+          break;
           
-          this.pendingIceCandidates.get(peerId)!.push(signal.candidate);
-        }
+        case 'answer':
+          console.log(`Processing answer from peer: ${peerId.slice(0, 6)}`);
+          
+          // Set the remote description
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          
+          // Process any pending ICE candidates
+          await this.processPendingIceCandidates(peerId, peerConnection);
+          break;
+          
+        case 'ice-candidate':
+          console.log(`Received ICE candidate from peer: ${peerId.slice(0, 6)}`);
+          
+          // If connection is not yet fully established, queue the candidate
+          if (!peerConnection.remoteDescription) {
+            if (!this.pendingIceCandidates.has(peerId)) {
+              this.pendingIceCandidates.set(peerId, []);
+            }
+            this.pendingIceCandidates.get(peerId)?.push(signal.candidate);
+          } else {
+            // Otherwise add it immediately
+            await this.addIceCandidate(peerId, peerConnection, signal.candidate);
+          }
+          break;
+          
+        default:
+          console.warn(`Unknown signal type from peer ${peerId.slice(0, 6)}:`, signal.type);
       }
-    } catch (error) {
-      console.error(`Error handling signal from peer ${peerId}:`, error);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error(`Error handling signal from peer ${peerId}:`, error.message);
+      } else {
+        console.error(`Unknown error handling signal from peer ${peerId}`);
+      }
     }
   }
   

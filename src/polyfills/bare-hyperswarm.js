@@ -1,12 +1,208 @@
 // Minimal Hyperswarm + WebRTC signaling implementation for browser environments
-// Inspired by Hypercore's approach to P2P connections
+// Focused on cross-tab communication and proper WebRTC connection establishment
 
-// Global signaling bus to simulate DHT for browser environment
-// This emulates how Hypercore handles signaling for WebRTC over Hyperswarm
+// Create a BroadcastChannel for signaling between browser tabs
+const BROADCAST_CHANNEL = new BroadcastChannel('hapa-flowchart-signaling');
+
+// Global registry to track peers and handle cross-tab communication
 const SIGNALING_BUS = window.HYPERSWARM_SIGNALING_BUS = window.HYPERSWARM_SIGNALING_BUS || {
   topics: new Map(), // Map<topicHex, Array<peerInfo>>
   signalChannels: new Map(), // Map<channelId, { source, target, messages }>
   connections: new Map(), // Map<peerId, Array<connectionInfo>>
+  instanceId: Math.random().toString(36).substring(2, 15),
+  
+  // Initialize the bus
+  init() {
+    // Set up broadcast channel message handling
+    BROADCAST_CHANNEL.onmessage = (event) => {
+      this.handleBroadcastMessage(event.data);
+    };
+    
+    // Announce our presence
+    this.broadcastMessage({
+      type: 'instance-announce',
+      instanceId: this.instanceId,
+      timestamp: Date.now()
+    });
+    
+    console.log(`[SignalingBus] Initialized with instance ID: ${this.instanceId}`);
+    
+    // Broadcast our topics when we start
+    setTimeout(() => {
+      this.broadcastTopics();
+    }, 100);
+  },
+  
+  // Send a message to all instances via BroadcastChannel
+  broadcastMessage(message) {
+    message.sender = this.instanceId;
+    BROADCAST_CHANNEL.postMessage(message);
+  },
+  
+  // Handle messages from other instances
+  handleBroadcastMessage(message) {
+    if (message.sender === this.instanceId) return; // Ignore our own messages
+    
+    console.log(`[SignalingBus] Received broadcast: ${message.type} from ${message.sender}`);
+    
+    switch (message.type) {
+      case 'instance-announce':
+        // When a new instance announces itself, share our topics with it
+        this.broadcastTopics();
+        break;
+        
+      case 'topic-announce':
+        // A new topic has been announced by another instance
+        this.handleRemoteTopicAnnounce(message);
+        break;
+        
+      case 'peer-joined':
+        // A new peer joined a topic in another instance
+        this.handleRemotePeerJoined(message);
+        break;
+        
+      case 'signal':
+        // A WebRTC signaling message
+        this.handleRemoteSignal(message);
+        break;
+    }
+  },
+  
+  // Broadcast all our active topics
+  broadcastTopics() {
+    for (const [topicHex, peers] of this.topics.entries()) {
+      this.broadcastMessage({
+        type: 'topic-announce',
+        topicHex,
+        peers: peers.map(p => ({
+          id: p.id,
+          instanceId: this.instanceId
+        }))
+      });
+    }
+  },
+  
+  // Handle a topic announcement from another instance
+  handleRemoteTopicAnnounce(message) {
+    const { topicHex, peers } = message;
+    
+    // Check if we have a local instance interested in this topic
+    if (this.topics.has(topicHex)) {
+      console.log(`[SignalingBus] Remote instance ${message.sender} has topic ${topicHex.slice(0, 6)} with ${peers.length} peers`);
+      
+      const ourPeers = this.topics.get(topicHex);
+      
+      // For each of our peers, notify the remote instance and create channels with their peers
+      ourPeers.forEach(localPeer => {
+        // Announce our peer to the remote instance
+        this.broadcastMessage({
+          type: 'peer-joined',
+          topicHex,
+          peer: {
+            id: localPeer.id,
+            instanceId: this.instanceId
+          }
+        });
+        
+        // Create channels with each remote peer
+        peers.forEach(remotePeer => {
+          this.createSignalingChannel(localPeer, remotePeer, topicHex);
+        });
+      });
+    }
+  },
+  
+  // Handle a peer-joined event from another instance
+  handleRemotePeerJoined(message) {
+    const { topicHex, peer } = message;
+    
+    // Check if we have a local instance interested in this topic
+    if (this.topics.has(topicHex)) {
+      console.log(`[SignalingBus] Remote peer ${peer.id.slice(0, 6)} joined topic ${topicHex.slice(0, 6)}`);
+      
+      // Notify our local peers about this remote peer
+      const ourPeers = this.topics.get(topicHex);
+      
+      ourPeers.forEach(localPeer => {
+        // Create a simulated connection between the local peer and remote peer
+        this.createSignalingChannel(localPeer, peer, topicHex);
+      });
+    }
+  },
+  
+  // Create a signaling channel between a local and remote peer
+  createSignalingChannel(localPeer, remotePeer, topicHex) {
+    // Skip if it's the same peer (can happen with cross-tab instances)
+    if (localPeer.id === remotePeer.id) {
+      return;
+    }
+    
+    const channelId = this.createChannelId(localPeer.id, remotePeer.id);
+    
+    // Only create the channel if it doesn't exist
+    if (!this.signalChannels.has(channelId)) {
+      console.log(`[SignalingBus] Creating signal channel ${channelId.slice(0, 8)} between local peer ${localPeer.id.slice(0, 6)} and remote peer ${remotePeer.id.slice(0, 6)}`);
+      
+      this.signalChannels.set(channelId, {
+        peers: [localPeer.id, remotePeer.id],
+        messages: [],
+        localInstanceId: this.instanceId,
+        remoteInstanceId: remotePeer.instanceId,
+        topic: topicHex
+      });
+      
+      // Create a simulated connection for the local peer
+      const conn = {
+        peerConnection: true,
+        remoteId: remotePeer.id,
+        channelId,
+        write: (data) => {
+          // Broadcast the signal to all instances
+          this.broadcastMessage({
+            type: 'signal',
+            channelId,
+            fromPeerId: localPeer.id,
+            toPeerId: remotePeer.id,
+            data
+          });
+        }
+      };
+      
+      // Determine which side should initiate the connection
+      // Using lexicographical comparison of peer IDs
+      const shouldInitiate = localPeer.id < remotePeer.id;
+      
+      console.log(`[SignalingBus] Connection between ${localPeer.id.slice(0, 6)} and ${remotePeer.id.slice(0, 6)}, local peer ${shouldInitiate ? 'will' : 'will not'} initiate`);
+      
+      // Trigger connection event on local peer
+      localPeer.instance.simulateConnection(conn, {
+        publicKey: Buffer.from(remotePeer.id, 'hex'),
+        shouldInitiate
+      });
+    }
+  },
+  
+  // Handle a signaling message from another instance
+  handleRemoteSignal(message) {
+    const { channelId, fromPeerId, toPeerId, data } = message;
+    
+    // Check if we have the target peer locally
+    let targetPeer = null;
+    for (const [_, peers] of this.topics.entries()) {
+      targetPeer = peers.find(p => p.id === toPeerId);
+      if (targetPeer) break;
+    }
+    
+    if (targetPeer) {
+      console.log(`[SignalingBus] Delivering signal from peer ${fromPeerId.slice(0, 6)} to peer ${toPeerId.slice(0, 6)}`);
+      
+      // Deliver the signal to the local peer
+      targetPeer.instance.receiveSignal({
+        from: fromPeerId,
+        data
+      });
+    }
+  },
   
   // Register a peer on a topic
   registerPeer(topicHex, peer) {
@@ -22,132 +218,83 @@ const SIGNALING_BUS = window.HYPERSWARM_SIGNALING_BUS = window.HYPERSWARM_SIGNAL
     if (existingPeerIndex >= 0) {
       // Update existing peer
       peers[existingPeerIndex] = peer;
-      console.log(`[SignalingBus] Updated existing peer ${peer.id.slice(0, 6)} in topic ${topicHex.slice(0, 6)}`);
     } else {
       // Add new peer
       peers.push(peer);
-      console.log(`[SignalingBus] Peer ${peer.id.slice(0, 6)} joined topic ${topicHex.slice(0, 6)}`);
       
-      // Notify other peers about this new peer (after a short delay to ensure initialization)
-      setTimeout(() => {
-        // Check if peers still exists in the topic
-        if (this.topics.has(topicHex)) {
-          const currentPeers = this.topics.get(topicHex);
-          if (currentPeers.some(p => p.id === peer.id)) {
-            this.notifyPeerJoined(topicHex, peer);
-          }
-        }
-      }, 100);
+      // Notify other instances
+      this.notifyPeerJoined(topicHex, peer);
     }
     
-    // Log all peers in this topic
-    console.log(`[SignalingBus] Topic ${topicHex.slice(0, 6)} now has ${peers.length} peers: ${peers.map(p => p.id.slice(0, 6)).join(', ')}`);
+    // Get all existing peers from other instances
+    const remotePeers = [];
+    for (const [channelId, channel] of this.signalChannels.entries()) {
+      if (channel.topic === topicHex) {
+        // Find the remote peer in this channel
+        const remotePeerId = channel.peers.find(id => id !== peer.id);
+        if (remotePeerId) {
+          remotePeers.push({
+            id: remotePeerId,
+            instanceId: channel.localInstanceId === this.instanceId ? channel.remoteInstanceId : channel.localInstanceId
+          });
+        }
+      }
+    }
     
-    // Return existing peers for this topic (excluding self)
-    return peers.filter(p => p.id !== peer.id);
+    return remotePeers;
   },
   
-  // Remove a peer from a topic
+  // Unregister a peer from a topic
   unregisterPeer(topicHex, peerId) {
-    if (!this.topics.has(topicHex)) return;
+    console.log(`[SignalingBus] Unregistering peer ${peerId.slice(0, 6)} from topic ${topicHex.slice(0, 6)}`);
     
-    const peers = this.topics.get(topicHex);
-    const peerIndex = peers.findIndex(p => p.id === peerId);
-    
-    if (peerIndex >= 0) {
-      const peer = peers[peerIndex];
-      peers.splice(peerIndex, 1);
-      console.log(`[SignalingBus] Peer ${peerId.slice(0, 6)} left topic ${topicHex.slice(0, 6)}`);
+    if (this.topics.has(topicHex)) {
+      const peers = this.topics.get(topicHex);
+      const peerIndex = peers.findIndex(p => p.id === peerId);
       
-      // Close any signal channels involving this peer
-      this.closeSignalChannelsForPeer(peerId);
-      
-      // Notify other peers about this peer leaving
-      this.notifyPeerLeft(topicHex, peer);
+      if (peerIndex >= 0) {
+        const peer = peers[peerIndex];
+        peers.splice(peerIndex, 1);
+        
+        // If no peers left, remove the topic
+        if (peers.length === 0) {
+          this.topics.delete(topicHex);
+        }
+        
+        // Notify other instances
+        this.notifyPeerLeft(topicHex, peer);
+      }
     }
+    
+    // Clean up any signal channels for this peer
+    this.closeSignalChannelsForPeer(peerId);
   },
   
-  // Notify peers when a new peer joins
+  // Notify other instances of a new peer
   notifyPeerJoined(topicHex, newPeer) {
-    if (!this.topics.has(topicHex)) return;
-    
-    const peers = this.topics.get(topicHex);
-    
-    // For each existing peer, establish a bidirectional signaling channel
-    peers.forEach(peer => {
-      if (peer.id !== newPeer.id) {
-        // Create a unique channel ID for this peer pair
-        const channelId = this.createChannelId(peer.id, newPeer.id);
-        
-        // Initialize the signaling channel
-        if (!this.signalChannels.has(channelId)) {
-          this.signalChannels.set(channelId, {
-            peers: [peer.id, newPeer.id],
-            messages: []
-          });
-          
-          console.log(`[SignalingBus] Created signal channel ${channelId.slice(0, 8)} between peers ${peer.id.slice(0, 6)} and ${newPeer.id.slice(0, 6)}`);
-          
-          // Trigger connection events for both peers
-          setTimeout(() => {
-            // Create a simulated connection for peer
-            const connForPeer = {
-              peerConnection: true,
-              remoteId: newPeer.id,
-              write: (data) => this.sendSignal(peer.id, newPeer.id, data),
-              channelId
-            };
-            
-            // Create a simulated connection for new peer
-            const connForNewPeer = {
-              peerConnection: true,
-              remoteId: peer.id,
-              write: (data) => this.sendSignal(newPeer.id, peer.id, data),
-              channelId
-            };
-            
-            // Trigger connection events
-            peer.instance.simulateConnection(connForPeer, { 
-              publicKey: Buffer.from(newPeer.id, 'hex')
-            });
-            
-            newPeer.instance.simulateConnection(connForNewPeer, { 
-              publicKey: Buffer.from(peer.id, 'hex')
-            });
-          }, 50);
-        }
+    this.broadcastMessage({
+      type: 'peer-joined',
+      topicHex,
+      peer: {
+        id: newPeer.id,
+        instanceId: this.instanceId
       }
     });
   },
   
-  // Notify peers when a peer leaves
+  // Notify other instances of a peer leaving
   notifyPeerLeft(topicHex, departedPeer) {
-    if (!this.topics.has(topicHex)) return;
-    
-    const peers = this.topics.get(topicHex);
-    
-    peers.forEach(peer => {
-      if (peer.id !== departedPeer.id) {
-        // Find channels involving both peers
-        const channelId = this.createChannelId(peer.id, departedPeer.id);
-        
-        if (this.signalChannels.has(channelId)) {
-          // Trigger disconnection event
-          peer.instance.simulateDisconnection({}, { 
-            publicKey: Buffer.from(departedPeer.id, 'hex')
-          });
-          
-          // Remove the signal channel
-          this.signalChannels.delete(channelId);
-          console.log(`[SignalingBus] Removed signal channel ${channelId.slice(0, 8)}`);
-        }
-      }
+    this.broadcastMessage({
+      type: 'peer-left',
+      topicHex,
+      peerId: departedPeer.id,
+      instanceId: this.instanceId
     });
   },
   
-  // Create a deterministic channel ID for two peers
+  // Create a deterministic channel ID from two peer IDs
   createChannelId(peerId1, peerId2) {
-    // Sort peer IDs to ensure the same channel ID regardless of order
+    // Sort the IDs to ensure the same channel ID regardless of order
     const sortedIds = [peerId1, peerId2].sort();
     return `${sortedIds[0]}-${sortedIds[1]}`;
   },
@@ -156,67 +303,48 @@ const SIGNALING_BUS = window.HYPERSWARM_SIGNALING_BUS = window.HYPERSWARM_SIGNAL
   sendSignal(fromPeerId, toPeerId, data) {
     const channelId = this.createChannelId(fromPeerId, toPeerId);
     
-    if (!this.signalChannels.has(channelId)) {
-      console.warn(`[SignalingBus] No signal channel exists for ${channelId.slice(0, 8)}`);
-      return;
-    }
+    console.log(`[SignalingBus] Sending signal from ${fromPeerId.slice(0, 6)} to ${toPeerId.slice(0, 6)}`);
     
-    // Find the target peer in any topic (we don't need to know which one)
-    let targetPeer = null;
-    
-    for (const [_, peers] of this.topics.entries()) {
-      targetPeer = peers.find(p => p.id === toPeerId);
-      if (targetPeer) break;
-    }
-    
-    if (!targetPeer) {
-      console.warn(`[SignalingBus] Target peer ${toPeerId.slice(0, 6)} not found`);
-      return;
-    }
-    
-    // Record the message
-    const channel = this.signalChannels.get(channelId);
-    channel.messages.push({
-      from: fromPeerId,
-      to: toPeerId,
-      data,
-      timestamp: Date.now()
+    // Broadcast to all instances
+    this.broadcastMessage({
+      type: 'signal',
+      channelId,
+      fromPeerId,
+      toPeerId,
+      data
     });
-    
-    // Log the signal type if it's JSON
-    try {
-      const jsonData = JSON.parse(data.toString());
-      console.log(`[SignalingBus] Signal from ${fromPeerId.slice(0, 6)} to ${toPeerId.slice(0, 6)}: ${jsonData.type || 'unknown'}`);
-    } catch (e) {
-      console.log(`[SignalingBus] Binary data signal from ${fromPeerId.slice(0, 6)} to ${toPeerId.slice(0, 6)}`);
-    }
-    
-    // Deliver the message to the target with a small delay (simulating network)
-    setTimeout(() => {
-      // Deliver the signal to the recipient
-      targetPeer.instance.receiveSignal({
-        from: fromPeerId,
-        data: Buffer.from(data)
-      });
-    }, 20);
   },
   
-  // Close all signal channels for a specific peer
+  // Close all signal channels for a peer
   closeSignalChannelsForPeer(peerId) {
+    // Find channels involving this peer
+    const channelsToClose = [];
+    
     for (const [channelId, channel] of this.signalChannels.entries()) {
       if (channel.peers.includes(peerId)) {
-        this.signalChannels.delete(channelId);
-        console.log(`[SignalingBus] Closed signal channel ${channelId.slice(0, 8)} involving peer ${peerId.slice(0, 6)}`);
+        channelsToClose.push(channelId);
       }
     }
+    
+    // Close the channels
+    channelsToClose.forEach(channelId => {
+      console.log(`[SignalingBus] Closing signal channel ${channelId}`);
+      this.signalChannels.delete(channelId);
+    });
   },
   
-  // Get all peers in a topic
+  // Get all peers for a topic
   getPeers(topicHex) {
-    if (!this.topics.has(topicHex)) return [];
+    if (!this.topics.has(topicHex)) {
+      return [];
+    }
+    
     return this.topics.get(topicHex);
   }
 };
+
+// Initialize the signaling bus
+SIGNALING_BUS.init();
 
 /**
  * A basic implementation of the Hyperswarm API for browser environments
@@ -238,11 +366,11 @@ export class Hyperswarm {
     console.log(`[Hyperswarm] Created instance with ID ${this.id.slice(0, 6)}`);
   }
   
-  // Generate a random peer ID
+  // Generate a random ID for this instance
   generateId() {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
   
   // Join a DHT topic
@@ -266,7 +394,6 @@ export class Hyperswarm {
     });
     
     // If there are existing peers, simulate connections with them
-    // This mimics the behavior of Hypercore's discovery process
     if (existingPeers.length > 0) {
       console.log(`[Hyperswarm] Found ${existingPeers.length} existing peers in topic ${topicHex.slice(0, 6)}`);
       
@@ -286,8 +413,12 @@ export class Hyperswarm {
           
           // Simulate a connection event with a small delay
           setTimeout(() => {
+            // Determine which side should initiate based on peer IDs
+            const shouldInitiate = this.id < peer.id;
+            
             this.emit('connection', conn, { 
-              publicKey: Buffer.from(peer.id, 'hex') 
+              publicKey: Buffer.from(peer.id, 'hex'),
+              shouldInitiate
             });
           }, 50);
         }, index * 100); // Stagger connections by 100ms
@@ -300,7 +431,7 @@ export class Hyperswarm {
     };
   }
   
-  // Leave a DHT topic
+  // Leave a topic
   leave(topic) {
     const topicHex = Buffer.from(topic).toString('hex');
     
@@ -311,29 +442,49 @@ export class Hyperswarm {
     
     // Remove the topic
     this.topics.delete(topicHex);
+    
+    // Close connections to peers in this topic that are no longer needed
+    for (const [peerId, conn] of this.connections.entries()) {
+      let stillNeeded = false;
+      
+      // Check if this peer is still needed for other topics
+      for (const [otherTopicHex, topicInfo] of this.topics.entries()) {
+        if (topicInfo.peers.has(peerId)) {
+          stillNeeded = true;
+          break;
+        }
+      }
+      
+      // If not needed, close the connection
+      if (!stillNeeded) {
+        console.log(`[Hyperswarm] Closing connection to peer ${peerId.slice(0, 6)}`);
+        this.simulateDisconnection(conn, { publicKey: Buffer.from(peerId, 'hex') });
+        this.connections.delete(peerId);
+      }
+    }
   }
   
-  // Add an event listener
+  // Event emitter methods
   on(event, callback) {
-    if (this.eventHandlers[event]) {
-      this.eventHandlers[event].push(callback);
+    if (!this.eventHandlers[event]) {
+      this.eventHandlers[event] = [];
     }
-    return this;
+    this.eventHandlers[event].push(callback);
   }
   
-  // Add a one-time event listener
   once(event, callback) {
-    if (this.eventHandlers[event]) {
-      const wrappedCallback = (...args) => {
-        this.off(event, wrappedCallback);
-        callback(...args);
-      };
-      this.eventHandlers[event].push(wrappedCallback);
+    if (!this.eventHandlers[event]) {
+      this.eventHandlers[event] = [];
     }
-    return this;
+    
+    const wrappedCallback = (...args) => {
+      this.off(event, wrappedCallback);
+      callback(...args);
+    };
+    
+    this.eventHandlers[event].push(wrappedCallback);
   }
   
-  // Remove an event listener
   off(event, callback) {
     if (this.eventHandlers[event]) {
       const index = this.eventHandlers[event].indexOf(callback);
@@ -341,17 +492,18 @@ export class Hyperswarm {
         this.eventHandlers[event].splice(index, 1);
       }
     }
-    return this;
   }
   
-  // Emit an event (internal use)
   emit(event, ...args) {
     if (this.eventHandlers[event]) {
       for (const callback of this.eventHandlers[event]) {
-        callback(...args);
+        try {
+          callback(...args);
+        } catch (err) {
+          console.error(`Error in ${event} event handler:`, err);
+        }
       }
     }
-    return this;
   }
   
   // Handle receiving signals (called by the signaling bus)
@@ -372,7 +524,7 @@ export class Hyperswarm {
   simulateConnection(connection, info) {
     const peerId = info.publicKey.toString('hex');
     
-    console.log(`[Hyperswarm] Connection with peer ${peerId.slice(0, 6)}`);
+    console.log(`[Hyperswarm] Connection with peer ${peerId.slice(0, 6)}, ${info.shouldInitiate ? 'will' : 'will not'} initiate`);
     
     // Store the connection
     this.connections.set(peerId, connection);
@@ -392,17 +544,14 @@ export class Hyperswarm {
     this.emit('connection', connection, info);
   }
   
-  // Simulate a disconnection (called by the signaling bus)
+  // Simulate a disconnection
   simulateDisconnection(connection, info) {
     const peerId = info.publicKey.toString('hex');
     
     console.log(`[Hyperswarm] Disconnection from peer ${peerId.slice(0, 6)}`);
     
-    // Remove the connection
-    this.connections.delete(peerId);
-    
     // Remove peer from all topics
-    for (const [_, topicInfo] of this.topics.entries()) {
+    for (const [topicHex, topicInfo] of this.topics.entries()) {
       topicInfo.peers.delete(peerId);
     }
     
@@ -428,5 +577,45 @@ export class Hyperswarm {
     }
     
     return Promise.resolve();
+  }
+}
+
+// Create a Buffer shim for browsers
+if (typeof Buffer === 'undefined') {
+  window.Buffer = {
+    from: (input, encoding) => {
+      if (typeof input === 'string') {
+        if (encoding === 'hex') {
+          // Convert hex string to Uint8Array
+          const arr = new Uint8Array(input.length / 2);
+          for (let i = 0; i < input.length; i += 2) {
+            arr[i / 2] = parseInt(input.substring(i, i + 2), 16);
+          }
+          return arr;
+        }
+        // Default to UTF-8
+        return new TextEncoder().encode(input);
+      }
+      return input;
+    }
+  };
+}
+
+// Export a DHT class with the same API as hyperswarm's DHT
+export class DHT {
+  constructor(opts = {}) {
+    this.options = opts;
+  }
+  
+  async lookup(key) {
+    return [];
+  }
+  
+  async bootstrap(nodes = []) {
+    return;
+  }
+  
+  async destroy() {
+    return;
   }
 } 
