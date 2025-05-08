@@ -23,8 +23,6 @@ class YjsService {
   private connectionAttempts: number = 0;
   private maxConnectionAttempts: number = 3;
   private initialized: boolean = false;
-  private p2pInitialized: boolean = false;
-  private flowchartChangedCallback: (() => void) | null = null;
 
   // Initialize the Yjs document with a given ID
   public async initialize(documentId: string): Promise<void> {
@@ -52,45 +50,39 @@ class YjsService {
       this.nodesData = this.ydoc.getArray('nodes');
       this.edgesData = this.ydoc.getArray('edges');
 
-      // Set up persistence with IndexedDB for offline capabilities
-      try {
-        if (!this.indexeddbProvider) {
-          this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
-          console.log(`Created IndexedDB persistence for document: ${documentId}`);
-        }
-      
-        // Wait for IndexedDB to load data (if any exists)
-        await new Promise<void>((resolve) => {
-          if (this.indexeddbProvider) {
-            const syncTimeout = setTimeout(() => {
-              console.log('IndexedDB sync timeout');
-              resolve();
-            }, 1000);
-            
-            this.indexeddbProvider.on('synced', () => {
-              clearTimeout(syncTimeout);
-              console.log('IndexedDB data loaded');
-              resolve();
-            });
-          } else {
-            resolve();
-          }
-        });
-      } catch (error) {
-        console.error('Error setting up IndexedDB persistence:', error);
-        // Continue without IndexedDB - this is non-fatal
-      }
-
-      // Subscribe to document changes
-      this.subscribeToChanges();
-
-      // Initialize P2P connection - do this after initial data is loaded
+      // Use P2P service for communication and peer discovery
       await this.initializeP2PConnection(documentId);
+
+      // Set up persistence with IndexedDB for offline capabilities
+      if (!this.indexeddbProvider) {
+        this.indexeddbProvider = new IndexeddbPersistence(`hapa-flowchart-${documentId}`, this.ydoc);
+      }
+      
+      // Wait for IndexedDB to load data (if any exists)
+      await new Promise<void>((resolve) => {
+        if (this.indexeddbProvider) {
+          const syncTimeout = setTimeout(() => {
+            console.log('IndexedDB sync timeout');
+            resolve();
+          }, 1000);
+          
+          this.indexeddbProvider.on('synced', () => {
+            clearTimeout(syncTimeout);
+            console.log('IndexedDB data loaded');
+            resolve();
+          });
+        } else {
+          resolve();
+        }
+      });
 
       // Store only the document ID in Redux, not the Yjs document itself
       store.dispatch(setCollaborativeDocument({
         documentId
       }));
+      
+      // Subscribe to document changes
+      this.subscribeToChanges();
       
       // Mark the service as initialized
       this.initialized = true;
@@ -106,12 +98,6 @@ class YjsService {
   // Initialize P2P connection
   private async initializeP2PConnection(documentId: string): Promise<void> {
     try {
-      // If P2P is already initialized, skip to avoid cyclic initialization
-      if (this.p2pInitialized) {
-        console.log('P2P connection already initialized, skipping');
-        return;
-      }
-      
       console.log('Initializing P2P connection for document:', documentId);
       
       // Set up local awareness state for this document
@@ -128,61 +114,36 @@ class YjsService {
       // Subscribe to flowchart updates from P2P connections
       p2pService.onFlowchartUpdate((data) => {
         if (data && this.ydoc) {
-          console.log('Received flowchart update from P2P:', data.type || 'update');
+          console.log('Received flowchart update from P2P:', data);
           this.applyRemoteChanges(data);
         }
       });
       
-      // Mark as initialized to prevent cyclic calls
-      this.p2pInitialized = true;
-      
       // Send initial flowchart data if we have it
-      this.shareInitialData();
+      setTimeout(() => {
+        const currentData = this.getFlowchartData();
+        if (currentData && (currentData.nodes?.length > 0 || currentData.edges?.length > 0)) {
+          console.log('Sending initial flowchart data:', currentData);
+          p2pService.sendFlowchartUpdate({
+            initialData: {
+              nodes: currentData.nodes,
+              edges: currentData.edges
+            }
+          });
+        }
+      }, 500);
       
       console.log('P2P connection initialized successfully');
     } catch (error) {
       console.error('Failed to initialize P2P connection:', error);
-      
-      // Only retry if we haven't exceeded the max attempts
       if (this.connectionAttempts < this.maxConnectionAttempts) {
         this.connectionAttempts++;
         console.log(`Retrying connection (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
-        
-        // Wait a bit before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
         await this.initializeP2PConnection(documentId);
       } else {
-        this.p2pInitialized = false;
         throw error;
       }
     }
-  }
-
-  // Share initial data with peers
-  private shareInitialData(): void {
-    // Don't send empty data
-    const currentData = this.getFlowchartData();
-    if (!currentData || (!currentData.nodes?.length && !currentData.edges?.length)) {
-      console.log('No initial flowchart data to share');
-      return;
-    }
-    
-    // Use a timeout to ensure the P2P connection is established
-    setTimeout(() => {
-      console.log('Sharing initial flowchart data:', {
-        nodesCount: currentData.nodes?.length || 0,
-        edgesCount: currentData.edges?.length || 0
-      });
-      
-      p2pService.sendFlowchartUpdate({
-        type: 'initialData',
-        initialData: {
-          nodes: currentData.nodes,
-          edges: currentData.edges
-        }
-      });
-    }, 1000);
   }
 
   // Get the Yjs document (for components that need direct access)
@@ -213,167 +174,140 @@ class YjsService {
   private applyRemoteChanges(data: any): void {
     if (!this.ydoc) return;
     
-    // Special case for handling requestUpdate - send our current state
-    if (data.requestUpdate) {
-      console.log('Received request for current flowchart data');
-      this.shareInitialData();
-      return;
-    }
-    
-    console.log('Applying remote changes to Yjs doc:', data.type || 'unknown');
+    console.log('Applying remote changes to Yjs doc:', data);
     
     // Handle initial data sync
-    if (data.type === 'initialData' || data.initialData) {
-      console.log('Received initial flowchart data');
+    if (data.initialData) {
+      console.log('Received initial flowchart data:', data.initialData);
       
-      // Only apply if we have data to apply
-      if (!data.initialData?.nodes?.length && !data.initialData?.edges?.length) {
-        console.log('Initial data is empty, ignoring');
-        return;
-      }
-      
-      try {
-        this.ydoc.transact(() => {
-          // Update nodes
-          if (Array.isArray(data.initialData.nodes)) {
-            // Clear existing nodes
-            if (this.nodesData) {
-              this.nodesData.delete(0, this.nodesData.length);
-              
-              // Add new nodes
-              data.initialData.nodes.forEach((node: any) => {
-                if (this.nodesData) {
-                  this.nodesData.push([node]);
-                }
-              });
-            }
+      this.ydoc.transact(() => {
+        // Update nodes
+        if (Array.isArray(data.initialData.nodes)) {
+          // Clear existing nodes
+          if (this.nodesData) {
+            this.nodesData.delete(0, this.nodesData.length);
             
-            // Also update in flowchart map
-            if (this.flowchartData) {
-              this.flowchartData.set('nodes', data.initialData.nodes);
-            }
+            // Add new nodes
+            data.initialData.nodes.forEach((node: any) => {
+              if (this.nodesData) {
+                this.nodesData.push([node]);
+              }
+            });
           }
           
-          // Update edges
-          if (Array.isArray(data.initialData.edges)) {
-            // Clear existing edges
-            if (this.edgesData) {
-              this.edgesData.delete(0, this.edgesData.length);
-              
-              // Add new edges
-              data.initialData.edges.forEach((edge: any) => {
-                if (this.edgesData) {
-                  this.edgesData.push([edge]);
-                }
-              });
-            }
-            
-            // Also update in flowchart map
-            if (this.flowchartData) {
-              this.flowchartData.set('edges', data.initialData.edges);
-            }
+          // Also update in flowchart map
+          if (this.flowchartData) {
+            this.flowchartData.set('nodes', data.initialData.nodes);
           }
-        });
+        }
         
-        console.log('Successfully applied initial data');
-        
-        // Notify subscribers
-        this.notifyFlowchartUpdated();
-      } catch (error) {
-        console.error('Error applying initial data:', error);
-      }
+        // Update edges
+        if (Array.isArray(data.initialData.edges)) {
+          // Clear existing edges
+          if (this.edgesData) {
+            this.edgesData.delete(0, this.edgesData.length);
+            
+            // Add new edges
+            data.initialData.edges.forEach((edge: any) => {
+              if (this.edgesData) {
+                this.edgesData.push([edge]);
+              }
+            });
+          }
+          
+          // Also update in flowchart map
+          if (this.flowchartData) {
+            this.flowchartData.set('edges', data.initialData.edges);
+          }
+        }
+      });
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
       return;
     }
     
     // Handle node operations (move, delete, add)
     if (data.nodeOperation) {
       const op = data.nodeOperation;
-      console.log('Applying node operation:', op.type);
+      console.log('Applying node operation:', op);
       
-      try {
-        // Get the current nodes from the document
-        const nodes = this.getFlowchartData()?.nodes || [];
+      // Get the current nodes from the document
+      const nodes = this.getFlowchartData()?.nodes || [];
+      
+      if (op.type === 'move') {
+        // Update the position of the node
+        const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              position: op.position
+            };
+          }
+          return node;
+        });
         
-        if (op.type === 'move') {
-          // Update the position of the node
-          const updatedNodes = nodes.map((node: {id: string; position: {x: number; y: number}; [key: string]: any}) => {
-            if (node.id === op.id) {
-              return {
-                ...node,
-                position: op.position
-              };
-            }
-            return node;
-          });
-          
-          // Update the document with the new nodes
-          this.updateNodesData(updatedNodes);
-        } else if (op.type === 'add') {
-          // Add a new node
-          const updatedNodes = [...nodes, op.node];
-          this.updateNodesData(updatedNodes);
-        } else if (op.type === 'delete') {
-          // Remove a node
-          const updatedNodes = nodes.filter((node: {id: string; [key: string]: any}) => node.id !== op.id);
-          this.updateNodesData(updatedNodes);
-        } else if (op.type === 'update') {
-          // Update a node's properties
-          const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
-            if (node.id === op.id) {
-              return {
-                ...node,
-                ...op.properties
-              };
-            }
-            return node;
-          });
-          this.updateNodesData(updatedNodes);
-        }
-        
-        // Notify subscribers
-        this.notifyFlowchartUpdated();
-      } catch (error) {
-        console.error('Error applying node operation:', error);
+        // Update the document with the new nodes
+        this.updateNodesData(updatedNodes);
+      } else if (op.type === 'add') {
+        // Add a new node
+        const updatedNodes = [...nodes, op.node];
+        this.updateNodesData(updatedNodes);
+      } else if (op.type === 'delete') {
+        // Remove a node
+        const updatedNodes = nodes.filter((node: {id: string; [key: string]: any}) => node.id !== op.id);
+        this.updateNodesData(updatedNodes);
+      } else if (op.type === 'update') {
+        // Update a node's properties
+        const updatedNodes = nodes.map((node: {id: string; [key: string]: any}) => {
+          if (node.id === op.id) {
+            return {
+              ...node,
+              ...op.properties
+            };
+          }
+          return node;
+        });
+        this.updateNodesData(updatedNodes);
       }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
       return;
     }
     
     // Handle edge operations (add, delete, update)
     if (data.edgeOperation) {
       const op = data.edgeOperation;
-      console.log('Applying edge operation:', op.type);
+      console.log('Applying edge operation:', op);
       
-      try {
-        // Get the current edges from the document
-        const edges = this.getFlowchartData()?.edges || [];
-        
-        if (op.type === 'add') {
-          // Add a new edge
-          const updatedEdges = [...edges, op.edge];
-          this.updateEdgesData(updatedEdges);
-        } else if (op.type === 'delete') {
-          // Remove an edge
-          const updatedEdges = edges.filter((edge: {id: string; [key: string]: any}) => edge.id !== op.id);
-          this.updateEdgesData(updatedEdges);
-        } else if (op.type === 'update') {
-          // Update an edge's properties
-          const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
-            if (edge.id === op.id) {
-              return {
-                ...edge,
-                ...op.properties
-              };
-            }
-            return edge;
-          });
-          this.updateEdgesData(updatedEdges);
-        }
-        
-        // Notify subscribers
-        this.notifyFlowchartUpdated();
-      } catch (error) {
-        console.error('Error applying edge operation:', error);
+      // Get the current edges from the document
+      const edges = this.getFlowchartData()?.edges || [];
+      
+      if (op.type === 'add') {
+        // Add a new edge
+        const updatedEdges = [...edges, op.edge];
+        this.updateEdgesData(updatedEdges);
+      } else if (op.type === 'delete') {
+        // Remove an edge
+        const updatedEdges = edges.filter((edge: {id: string; [key: string]: any}) => edge.id !== op.id);
+        this.updateEdgesData(updatedEdges);
+      } else if (op.type === 'update') {
+        // Update an edge's properties
+        const updatedEdges = edges.map((edge: {id: string; [key: string]: any}) => {
+          if (edge.id === op.id) {
+            return {
+              ...edge,
+              ...op.properties
+            };
+          }
+          return edge;
+        });
+        this.updateEdgesData(updatedEdges);
       }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
       return;
     }
     
@@ -381,22 +315,18 @@ class YjsService {
     if (data.nodes || data.edges) {
       console.log('Applying complete flowchart update');
       
-      try {
-        // Update nodes if present
-        if (Array.isArray(data.nodes)) {
-          this.updateNodesData(data.nodes);
-        }
-        
-        // Update edges if present
-        if (Array.isArray(data.edges)) {
-          this.updateEdgesData(data.edges);
-        }
-        
-        // Notify subscribers
-        this.notifyFlowchartUpdated();
-      } catch (error) {
-        console.error('Error applying complete flowchart update:', error);
+      // Update nodes if present
+      if (Array.isArray(data.nodes)) {
+        this.updateNodesData(data.nodes);
       }
+      
+      // Update edges if present
+      if (Array.isArray(data.edges)) {
+        this.updateEdgesData(data.edges);
+      }
+      
+      // Notify subscribers
+      this.notifyFlowchartUpdated();
     }
   }
   
@@ -447,12 +377,10 @@ class YjsService {
       // Notify subscribers
       this.notifyFlowchartUpdated();
       
-      // Send update to peers if P2P is initialized
-      if (this.p2pInitialized) {
-        const data = this.getFlowchartData();
-        if (data) {
-          p2pService.sendFlowchartUpdate(data);
-        }
+      // Send update to peers
+      const data = this.getFlowchartData();
+      if (data) {
+        p2pService.sendFlowchartUpdate(data);
       }
     });
   }
@@ -463,6 +391,9 @@ class YjsService {
       this.flowchartChangedCallback();
     }
   }
+  
+  // Callback for flowchart changes
+  private flowchartChangedCallback: (() => void) | null = null;
   
   // Register a callback for flowchart changes
   public onFlowchartChanged(callback: () => void): void {
@@ -477,17 +408,15 @@ class YjsService {
       payload: { x, y }
     });
     
-    // Send to peers if P2P is initialized
-    if (this.p2pInitialized) {
-      p2pService.sendCursorPosition(x, y);
-    }
+    // Send to peers
+    p2pService.sendCursorPosition(x, y);
   }
   
   // Update the flowchart
   public updateFlowchart(data: any): void {
     if (!this.ydoc || !this.flowchartData) return;
     
-    console.log('Updating flowchart in YjsService:', data.type || 'update');
+    console.log('Updating flowchart in YjsService:', data);
     
     // Apply changes to the Yjs document
     if (data.nodes || data.edges) {
@@ -559,10 +488,8 @@ class YjsService {
       }
     }
     
-    // Send update to peers if P2P is initialized
-    if (this.p2pInitialized) {
-      p2pService.sendFlowchartUpdate(data);
-    }
+    // Send update to peers
+    p2pService.sendFlowchartUpdate(data);
   }
   
   // Get the current flowchart data
@@ -586,13 +513,8 @@ class YjsService {
     return this.initialized;
   }
   
-  // Check if P2P is initialized
-  public isP2PInitialized(): boolean {
-    return this.p2pInitialized;
-  }
-  
   // Clean up the service
-  public async cleanup(): Promise<void> {
+  public cleanup(): void {
     try {
       // If we're not initialized, don't need to clean up
       if (!this.initialized) {
@@ -600,10 +522,6 @@ class YjsService {
       }
       
       console.log('Cleaning up YjsService...');
-      
-      // Reset P2P initialization flag first to prevent recursive calls
-      const wasP2PInitialized = this.p2pInitialized;
-      this.p2pInitialized = false;
       
       // Clean up the Yjs document
       if (this.ydoc) {

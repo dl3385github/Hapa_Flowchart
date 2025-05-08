@@ -352,20 +352,15 @@ export class P2PService extends EventEmitter {
       
       // Create a new RTCPeerConnection
       const peerConnection = new RTCPeerConnection({
-        iceServers: ICE_SERVERS,
-        iceCandidatePoolSize: 10 // Increase candidate pool for better connectivity
+        iceServers: ICE_SERVERS
       });
       
       // Store the connection
       this.peerConnections.set(peerId, peerConnection);
       
       // Set up a data channel
-      const dataChannelId = `flowchart-${this.activeFlowchartKey?.slice(0, 6) || ''}-${Date.now()}`;
-      console.log(`Creating data channel: ${dataChannelId}`);
-      
-      const dataChannel = peerConnection.createDataChannel(dataChannelId, {
-        ordered: true,
-        negotiated: false  // Let WebRTC handle negotiation
+      const dataChannel = peerConnection.createDataChannel(`flowchart-${peerId.slice(0, 6)}`, {
+        ordered: true
       });
       
       // Handle data channel state changes
@@ -385,18 +380,6 @@ export class P2PService extends EventEmitter {
             type: 'user-info',
             info: this.localUserInfo
           });
-        }
-        
-        // Send initial flowchart data if we're the initiator
-        if (this.shouldInitiateConnection(peerId)) {
-          setTimeout(() => {
-            if (this.activeFlowchartKey && this.flowchartUpdateCallback) {
-              // Trigger a flowchart update callback to send the current state
-              this.flowchartUpdateCallback({
-                requestUpdate: true
-              });
-            }
-          }, 500);
         }
       };
       
@@ -462,14 +445,7 @@ export class P2PService extends EventEmitter {
           };
           
           swarmConn.write(JSON.stringify(signal));
-        } else {
-          console.log(`Finished generating ICE candidates for peer: ${peerId.slice(0, 6)}`);
         }
-      };
-      
-      // Handle ICE gathering state changes
-      peerConnection.onicegatheringstatechange = () => {
-        console.log(`ICE gathering state changed to: ${peerConnection.iceGatheringState}`);
       };
       
       // Handle ICE connection state changes
@@ -480,23 +456,7 @@ export class P2PService extends EventEmitter {
             peerConnection.iceConnectionState === 'failed' ||
             peerConnection.iceConnectionState === 'closed') {
           console.warn(`WebRTC connection with peer ${peerId.slice(0, 6)} ${peerConnection.iceConnectionState}`);
-          
-          // Only clean up if the state is failed or closed, try to recover from disconnected
-          if (peerConnection.iceConnectionState === 'failed' || 
-              peerConnection.iceConnectionState === 'closed') {
-            this.cleanupPeerConnection(peerId);
-          } else {
-            // For disconnected state, wait a bit and see if it recovers
-            setTimeout(() => {
-              if (this.peerConnections.has(peerId)) {
-                const currentState = this.peerConnections.get(peerId)?.iceConnectionState;
-                if (currentState === 'disconnected') {
-                  console.log(`Connection with peer ${peerId.slice(0, 6)} still disconnected, cleaning up`);
-                  this.cleanupPeerConnection(peerId);
-                }
-              }
-            }, 5000);
-          }
+          this.cleanupPeerConnection(peerId);
         } else if (peerConnection.iceConnectionState === 'connected') {
           console.log(`WebRTC connection with peer ${peerId.slice(0, 6)} established`);
           // Update connection status in Redux
@@ -504,25 +464,6 @@ export class P2PService extends EventEmitter {
             peerId,
             connection: 'connected'
           }));
-        }
-      };
-      
-      // Handle connection state changes
-      peerConnection.onconnectionstatechange = () => {
-        console.log(`Connection state with peer ${peerId.slice(0, 6)} changed to: ${peerConnection.connectionState}`);
-        
-        if (peerConnection.connectionState === 'connected') {
-          console.log(`Connection with peer ${peerId.slice(0, 6)} established successfully`);
-          
-          // Update the Redux store
-          store.dispatch(setPeerConnection({
-            peerId,
-            connection: 'connected'
-          }));
-        } else if (peerConnection.connectionState === 'failed' || 
-                   peerConnection.connectionState === 'closed') {
-          console.warn(`Connection with peer ${peerId.slice(0, 6)} ${peerConnection.connectionState}`);
-          this.cleanupPeerConnection(peerId);
         }
       };
       
@@ -534,8 +475,7 @@ export class P2PService extends EventEmitter {
           // Create and send offer
           const offer = await peerConnection.createOffer({
             offerToReceiveAudio: false,
-            offerToReceiveVideo: false,
-            iceRestart: true  // Allow ICE restart for better connectivity
+            offerToReceiveVideo: false
           });
           
           await peerConnection.setLocalDescription(offer);
@@ -552,17 +492,10 @@ export class P2PService extends EventEmitter {
           swarmConn.write(JSON.stringify(signal));
         } catch (err) {
           console.error(`Error creating offer for peer ${peerId.slice(0, 6)}:`, err);
-          store.dispatch(setSignalingError(`Error creating offer: ${err.message}`));
         }
       }
     } catch (error) {
       console.error(`Error setting up WebRTC with peer ${peerId}:`, error);
-      // Attempt graceful recovery
-      if (this.peerConnections.has(peerId)) {
-        this.cleanupPeerConnection(peerId);
-      }
-      
-      store.dispatch(setSignalingError(`WebRTC setup error: ${error.message}`));
     }
   }
   
@@ -598,10 +531,9 @@ export class P2PService extends EventEmitter {
           await peerConnection.setLocalDescription(answer);
           
           // Find the connection to send the answer
-          let found = false;
           for (const [topicHex, topicInfo] of this.swarm.topics.entries()) {
-            for (const remotePeerId of topicInfo.peers) {
-              if (remotePeerId === peerId) {
+            for (const remotePeer of topicInfo.peers) {
+              if (remotePeer === peerId) {
                 const conn = this.swarm.connections.get(peerId);
                 if (conn) {
                   // Send the answer
@@ -614,40 +546,16 @@ export class P2PService extends EventEmitter {
                   };
                   
                   conn.write(JSON.stringify(answerSignal));
-                  found = true;
                   
                   // Process any pending ICE candidates
-                  await this.processPendingIceCandidates(peerId, peerConnection);
+                  this.processPendingIceCandidates(peerId, peerConnection);
                   break;
                 }
               }
             }
-            if (found) break;
-          }
-          
-          if (!found) {
-            // Try to send through the global connection map as a fallback
-            const conn = this.swarm.connections.get(peerId);
-            if (conn) {
-              const answerSignal = {
-                type: 'answer',
-                sdp: {
-                  type: answer.type,
-                  sdp: answer.sdp
-                }
-              };
-              
-              conn.write(JSON.stringify(answerSignal));
-              
-              // Process any pending ICE candidates
-              await this.processPendingIceCandidates(peerId, peerConnection);
-            } else {
-              console.error(`Could not find connection to peer ${peerId.slice(0, 6)} to send answer`);
-            }
           }
         } catch (err) {
           console.error(`Error handling offer from peer ${peerId.slice(0, 6)}:`, err);
-          store.dispatch(setSignalingError(`Error handling offer: ${err.message}`));
         }
       } else if (signal.type === 'answer') {
         console.log(`Setting remote description (answer) from peer ${peerId.slice(0, 6)}`);
@@ -663,10 +571,9 @@ export class P2PService extends EventEmitter {
           await peerConnection.setRemoteDescription(rtcSessionDescription);
           
           // Process any pending ICE candidates
-          await this.processPendingIceCandidates(peerId, peerConnection);
+          this.processPendingIceCandidates(peerId, peerConnection);
         } catch (err) {
           console.error(`Error handling answer from peer ${peerId.slice(0, 6)}:`, err);
-          store.dispatch(setSignalingError(`Error handling answer: ${err.message}`));
         }
       } else if (signal.type === 'ice-candidate') {
         console.log(`Received ICE candidate from peer ${peerId.slice(0, 6)}`);
@@ -681,12 +588,10 @@ export class P2PService extends EventEmitter {
           }
           
           this.pendingIceCandidates.get(peerId)!.push(signal.candidate);
-          console.log(`Stored pending ICE candidate for peer ${peerId.slice(0, 6)}, now have ${this.pendingIceCandidates.get(peerId)!.length}`);
         }
       }
     } catch (error) {
       console.error(`Error handling signal from peer ${peerId}:`, error);
-      store.dispatch(setSignalingError(`Signaling error: ${error.message}`));
     }
   }
   
@@ -699,19 +604,10 @@ export class P2PService extends EventEmitter {
     if (!this.pendingIceCandidates.has(peerId)) return;
     
     const candidates = this.pendingIceCandidates.get(peerId)!;
-    console.log(`Processing ${candidates.length} pending ICE candidates for peer ${peerId.slice(0, 6)}`);
+    console.log(`Processing ${candidates.length} pending ICE candidates for peer ${peerId}`);
     
-    // Process each candidate with a small delay between them to avoid overwhelming the connection
-    for (let i = 0; i < candidates.length; i++) {
-      try {
-        await this.addIceCandidate(peerId, peerConnection, candidates[i]);
-        // Small delay between processing candidates
-        if (i < candidates.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 20));
-        }
-      } catch (error) {
-        console.error(`Error processing ICE candidate ${i} for peer ${peerId.slice(0, 6)}:`, error);
-      }
+    for (const candidate of candidates) {
+      await this.addIceCandidate(peerId, peerConnection, candidate);
     }
     
     // Clear the pending candidates
@@ -726,29 +622,10 @@ export class P2PService extends EventEmitter {
    */
   private async addIceCandidate(peerId: string, peerConnection: RTCPeerConnection, candidate: RTCIceCandidateInit): Promise<void> {
     try {
-      if (!peerConnection.remoteDescription) {
-        console.warn(`Cannot add ICE candidate for peer ${peerId.slice(0, 6)} without remote description`);
-        
-        // Store it to process later
-        if (!this.pendingIceCandidates.has(peerId)) {
-          this.pendingIceCandidates.set(peerId, []);
-        }
-        
-        this.pendingIceCandidates.get(peerId)!.push(candidate);
-        return;
-      }
-      
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      console.log(`Added ICE candidate for peer ${peerId.slice(0, 6)}`);
+      console.log(`Added ICE candidate for peer ${peerId}`);
     } catch (error) {
-      console.error(`Error adding ICE candidate for peer ${peerId.slice(0, 6)}:`, error);
-      
-      // If it's a timing issue, store the candidate to try again later
-      if (!this.pendingIceCandidates.has(peerId)) {
-        this.pendingIceCandidates.set(peerId, []);
-      }
-      
-      this.pendingIceCandidates.get(peerId)!.push(candidate);
+      console.error(`Error adding ICE candidate for peer ${peerId}:`, error);
     }
   }
   
