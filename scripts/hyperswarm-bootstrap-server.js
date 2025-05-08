@@ -1,43 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * Hyperswarm Web Bootstrap Server
- * 
- * This script runs a hyperswarm-web server that acts as both a WebRTC signaling server 
- * and a WebSocket proxy for hyperswarm connections.
- * 
- * Usage:
- *   node hyperswarm-bootstrap-server.js [--port 4977]
- */
-
-const hyperswarmWeb = require('hyperswarm-web/server');
-const minimist = require('minimist');
-
-// Parse command line arguments
-const argv = minimist(process.argv.slice(2), {
-  default: {
-    port: 4977, // Default port is 4977 (HYPR on a phone keypad)
-  },
-  alias: {
-    p: 'port',
-    h: 'help',
-  },
-});
-
-// Show help and exit if requested
-if (argv.help) {
-  console.log(`
-Hyperswarm Web Bootstrap Server
-
-Usage:
-  node hyperswarm-bootstrap-server.js [options]
-
-Options:
-  -p, --port    Port to listen on (default: 4977)
-  -h, --help    Show this help message
-  `);
-  process.exit(0);
-}
 
 // Start the server
 const port = parseInt(argv.port, 10);

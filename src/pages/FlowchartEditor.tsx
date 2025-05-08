@@ -29,7 +29,7 @@ import { setActiveFlowchart, updateNodes, updateEdges, applyChanges } from '../s
 import { setSelectedElements, clearSelection } from '../store/slices/uiSlice';
 import { updateLocalCursor } from '../store/slices/collaborationSlice';
 import { FlowChanges } from '../types';
-import { yjsService, webRTCService } from '../services';
+import { yjsService, p2pService } from '../services';
 
 // Components
 import EditorSidebar from '../components/flow/controls/EditorSidebar';
@@ -90,6 +90,10 @@ const FlowchartEditor: React.FC = () => {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   
+  // Use refs to track initialization status and prevent effect loops
+  const isInitializedRef = useRef<boolean>(false);
+  const flowchartKeyRef = useRef<string | null>(null);
+  
   // Set active flowchart when ID changes
   useEffect(() => {
     if (id && flowcharts[id]) {
@@ -97,75 +101,118 @@ const FlowchartEditor: React.FC = () => {
     }
   }, [id, flowcharts, dispatch]);
   
-  // Initialize Yjs for collaborative editing
+  // Initialize Yjs for collaborative editing - only once per flowchart key
   useEffect(() => {
     const initializeYjs = async () => {
-      if (id && id.startsWith('shared-') && activeFlowchartKey) {
-        if (isInitializing) return;
+      if (!id || !id.startsWith('shared-') || !activeFlowchartKey) return;
+      
+      // Skip if we're already initialized with this key or currently initializing
+      if (isInitializing || (isInitializedRef.current && flowchartKeyRef.current === activeFlowchartKey)) {
+        return;
+      }
+      
+      setIsInitializing(true);
+      setInitializationError(null);
+      
+      try {
+        console.log('Initializing Yjs with document ID:', activeFlowchartKey);
         
-        setIsInitializing(true);
-        setInitializationError(null);
+        // First initialize the P2P service if needed
+        if (!p2pService.getLocalPeerId()) {
+          await p2pService.initialize();
+        }
         
-        try {
-          console.log('Initializing Yjs with document ID:', activeFlowchartKey);
-          await yjsService.initialize(activeFlowchartKey);
-          
-          // Subscribe to flowchart changes
-          yjsService.onFlowchartChanged(() => {
-            const flowchartData = yjsService.getFlowchartData();
-            if (flowchartData) {
-              console.log('Received flowchart update from Yjs:', flowchartData);
+        // Initialize Yjs with the flowchart key as document ID
+        await yjsService.initialize(activeFlowchartKey);
+        
+        // Subscribe to flowchart changes
+        yjsService.onFlowchartChanged(() => {
+          const flowchartData = yjsService.getFlowchartData();
+          if (flowchartData) {
+            console.log('Received flowchart update from Yjs:', {
+              nodesCount: flowchartData.nodes?.length || 0,
+              edgesCount: flowchartData.edges?.length || 0
+            });
+            
+            try {
+              // Validate nodes before setting them
+              const validNodes = Array.isArray(flowchartData.nodes) 
+                ? flowchartData.nodes.filter((node: any) => {
+                    return node && 
+                      typeof node.id === 'string' && 
+                      typeof node.type === 'string' && 
+                      node.position && 
+                      typeof node.position.x === 'number' && 
+                      typeof node.position.y === 'number';
+                  })
+                : [];
               
-              try {
-                // Validate nodes before setting them
-                const validNodes = Array.isArray(flowchartData.nodes) 
-                  ? flowchartData.nodes.filter((node: any) => {
-                      return node && 
-                        typeof node.id === 'string' && 
-                        typeof node.type === 'string' && 
-                        node.position && 
-                        typeof node.position.x === 'number' && 
-                        typeof node.position.y === 'number';
-                    })
-                  : [];
+              // Validate edges before setting them
+              const validEdges = Array.isArray(flowchartData.edges)
+                ? flowchartData.edges.filter((edge: any) => {
+                    return edge && 
+                      typeof edge.id === 'string' && 
+                      typeof edge.source === 'string' && 
+                      typeof edge.target === 'string';
+                  })
+                : [];
                 
-                // Validate edges before setting them
-                const validEdges = Array.isArray(flowchartData.edges)
-                  ? flowchartData.edges.filter((edge: any) => {
-                      return edge && 
-                        typeof edge.id === 'string' && 
-                        typeof edge.source === 'string' && 
-                        typeof edge.target === 'string';
-                    })
-                  : [];
-                  
-                console.log('Setting nodes and edges in ReactFlow:', validNodes, validEdges);
+              if (validNodes.length > 0 || validEdges.length > 0) {
+                console.log('Setting nodes and edges in ReactFlow:', 
+                  validNodes.length, 'nodes,', 
+                  validEdges.length, 'edges'
+                );
                 setNodes(validNodes);
                 setEdges(validEdges);
-              } catch (err) {
-                console.error('Error processing flowchart data:', err);
               }
+            } catch (err) {
+              console.error('Error processing flowchart data:', err);
             }
-          });
-          
-          setIsInitializing(false);
-        } catch (err) {
-          console.error('Failed to initialize Yjs:', err);
-          setInitializationError('Failed to initialize collaborative editing');
-          setIsInitializing(false);
-        }
+          }
+        });
+        
+        // Mark as initialized
+        isInitializedRef.current = true;
+        flowchartKeyRef.current = activeFlowchartKey;
+        setIsInitializing(false);
+      } catch (err) {
+        console.error('Failed to initialize Yjs:', err);
+        setInitializationError('Failed to initialize collaborative editing');
+        setIsInitializing(false);
+        isInitializedRef.current = false;
+        flowchartKeyRef.current = null;
       }
     };
     
     initializeYjs();
     
+    // Clean up when component unmounts or flowchart ID changes
     return () => {
-      // Cleanup Yjs when component unmounts
-      if (id && id.startsWith('shared-')) {
-        yjsService.cleanup();
+      // We're only truly unmounting or changing flowcharts if the id changes
+      if (flowchartKeyRef.current && flowchartKeyRef.current !== activeFlowchartKey) {
+        console.log('Flowchart changed, cleaning up Yjs...');
+        yjsService.cleanup().catch(err => {
+          console.error('Error cleaning up Yjs:', err);
+        });
+        isInitializedRef.current = false;
+        flowchartKeyRef.current = null;
       }
     };
-  }, [id, activeFlowchartKey, setNodes, setEdges]);
+  }, [id, activeFlowchartKey, isInitializing]); // Reduced dependency array
+  
+  // Proper cleanup when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log('Component unmounting, cleaning up services...');
+      if (isInitializedRef.current) {
+        yjsService.cleanup().catch(err => {
+          console.error('Error cleaning up Yjs on unmount:', err);
+        });
+        isInitializedRef.current = false;
+        flowchartKeyRef.current = null;
+      }
+    };
+  }, []);
   
   // Update local nodes/edges when flowchart changes in non-collaborative mode
   useEffect(() => {
@@ -202,26 +249,46 @@ const FlowchartEditor: React.FC = () => {
   
   // Initialize collaborative flowchart when first loaded
   useEffect(() => {
-    const initializeCollaborativeFlowchart = () => {
+    const initializeCollaborativeFlowchart = async () => {
       if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && activeFlowchart) {
-        // If this is a shared flowchart and we're the first to create it, initialize with our data
-        if (activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) {
-          console.log('Initializing collaborative flowchart with local data');
-          
-          yjsService.updateFlowchart({
-            properties: { id: activeFlowchart.id, name: activeFlowchart.name },
-            nodes: activeFlowchart.nodes,
-            edges: activeFlowchart.edges
-          });
-        } else {
-          // If we're joining an existing flowchart, request data from peers
-          console.log('Requesting collaborative flowchart data from peers');
+        try {
+          // If this is a shared flowchart and we're the first to create it, initialize with our data
+          if (activeFlowchart.nodes.length > 0 || activeFlowchart.edges.length > 0) {
+            console.log('Initializing collaborative flowchart with local data');
+            
+            // Give a small delay to ensure P2P connections are established
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            yjsService.updateFlowchart({
+              type: 'initialData',
+              properties: { id: activeFlowchart.id, name: activeFlowchart.name },
+              initialData: {
+                nodes: activeFlowchart.nodes,
+                edges: activeFlowchart.edges
+              }
+            });
+          } else {
+            // If we're joining an existing flowchart, request data from peers
+            console.log('Requesting collaborative flowchart data from peers');
+            
+            // Give a small delay to ensure P2P connections are established
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Request current state from peers
+            if (yjsService.isP2PInitialized()) {
+              p2pService.sendFlowchartUpdate({
+                requestUpdate: true
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Error initializing collaborative flowchart:', err);
         }
       }
     };
     
     // One-time initialization when the component mounts
-    if (isSharedFlowchart && activeFlowchartKey && activeFlowchart) {
+    if (isSharedFlowchart && activeFlowchartKey && activeFlowchart && yjsService.isInitialized()) {
       initializeCollaborativeFlowchart();
     }
   }, [id, activeFlowchartKey, activeFlowchart, isSharedFlowchart]);
@@ -230,41 +297,52 @@ const FlowchartEditor: React.FC = () => {
   const handleMouseMove = useCallback((event: React.MouseEvent) => {
     if (!reactFlowWrapper.current || !reactFlowInstance || !isConnected) return;
     
-    const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
-    const position = reactFlowInstance.project({
-      x: event.clientX - reactFlowBounds.left,
-      y: event.clientY - reactFlowBounds.top,
-    });
-    
-    // Update cursor position in Redux
-    dispatch(updateLocalCursor({ x: position.x, y: position.y }));
-    
-    // Broadcast cursor position via Yjs
-    yjsService.updateCursorPosition(position.x, position.y);
+    // Only update cursor position at most once every 50ms to reduce traffic
+    if (!lastCursorUpdateRef.current || Date.now() - lastCursorUpdateRef.current > 50) {
+      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+      const position = reactFlowInstance.project({
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top,
+      });
+      
+      // Update cursor position in Redux
+      dispatch(updateLocalCursor({ x: position.x, y: position.y }));
+      
+      // Broadcast cursor position via Yjs
+      if (yjsService.isP2PInitialized()) {
+        yjsService.updateCursorPosition(position.x, position.y);
+      }
+      
+      // Update timestamp
+      lastCursorUpdateRef.current = Date.now();
+    }
   }, [reactFlowInstance, isConnected, dispatch]);
+  
+  // Reference for tracking cursor update timestamps to throttle updates
+  const lastCursorUpdateRef = useRef<number | null>(null);
   
   // Handle node changes
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // Apply the changes locally
-      onNodesChange(changes);
+    onNodesChange(changes);
       
     // If this is a shared flowchart, broadcast the changes
-    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
-      console.log('Broadcasting node changes:', changes);
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && yjsService.isP2PInitialized()) {
+      console.log('Broadcasting node changes:', changes.map(c => c.type));
       
-          changes.forEach(change => {
-            if (change.type === 'position' && change.position) {
+      changes.forEach(change => {
+        if (change.type === 'position' && change.position) {
           // Send node position update to peers
-          webRTCService.sendFlowchartUpdate({
+          yjsService.updateFlowchart({
             nodeOperation: {
               type: 'move',
               id: change.id,
-                  position: change.position
+              position: change.position
             }
           });
         } else if (change.type === 'remove') {
           // Send node deletion to peers
-          webRTCService.sendFlowchartUpdate({
+          yjsService.updateFlowchart({
             nodeOperation: {
               type: 'delete',
               id: change.id
@@ -272,28 +350,22 @@ const FlowchartEditor: React.FC = () => {
           });
         }
       });
-    } else {
-      // Regular non-collaborative flowchart
-      if (id && activeFlowchart) {
-        const updatedNodes = applyNodeChanges(changes, activeFlowchart.nodes);
-        dispatch(updateNodes({ id, changes }));
-      }
     }
-  }, [id, onNodesChange, activeFlowchart, dispatch, activeFlowchartKey]);
+  }, [id, activeFlowchartKey, onNodesChange, yjsService]);
   
   // Handle edge changes
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     // Apply the changes locally
-      onEdgesChange(changes);
-    
-    // If this is a shared flowchart, broadcast the changes
-    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
-      console.log('Broadcasting edge changes:', changes);
+    onEdgesChange(changes);
       
-          changes.forEach(change => {
-            if (change.type === 'remove') {
+    // If this is a shared flowchart, broadcast the changes
+    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && yjsService.isP2PInitialized()) {
+      console.log('Broadcasting edge changes:', changes.map(c => c.type));
+      
+      changes.forEach(change => {
+        if (change.type === 'remove') {
           // Send edge deletion to peers
-          webRTCService.sendFlowchartUpdate({
+          yjsService.updateFlowchart({
             edgeOperation: {
               type: 'delete',
               id: change.id
@@ -301,52 +373,39 @@ const FlowchartEditor: React.FC = () => {
           });
         }
       });
-    } else {
-      // Regular non-collaborative flowchart
-      if (id && activeFlowchart) {
-        dispatch(updateEdges({ id, changes }));
-      }
     }
-  }, [id, onEdgesChange, activeFlowchart, dispatch, activeFlowchartKey]);
+  }, [id, activeFlowchartKey, onEdgesChange]);
   
-  // Handle new connections
-  const onConnect = useCallback((connection: Connection) => {
-    // Generate a unique ID for the edge
-    const edgeId = `edge-${uuidv4()}`;
-    const newEdge: Edge = {
-      ...connection,
-      id: edgeId,
-      type: 'custom',
-      animated: false,
-      source: connection.source || '',
-      target: connection.target || ''
-    };
-    
-    // Add the edge to the local state
-    setEdges(eds => addEdge(newEdge, eds));
-          
-    // If this is a shared flowchart, broadcast the new edge
-    if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized()) {
-      console.log('Broadcasting new edge:', newEdge);
+  // Handle connecting nodes
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      // Generate a unique ID for the new edge
+      const newEdge = {
+        ...connection,
+        id: 'edge-' + Math.random().toString(36).substr(2, 9),
+        animated: connection.sourceHandle === 'conditionalOutput',
+        label: ''
+      };
       
-      // Send new edge to peers
-      webRTCService.sendFlowchartUpdate({
-        edgeOperation: {
-          type: 'add',
-          edge: newEdge
-        }
-          });
-    } else {
-      // Regular non-collaborative flowchart
-      if (id && activeFlowchart) {
-        const change: {type: 'add'; item: Edge} = {
-          type: 'add', 
-          item: newEdge
-        };
-        dispatch(updateEdges({ id, changes: [change] }));
+      console.log('Creating new connection:', newEdge);
+      
+      // Apply locally
+      setEdges((eds) => addEdge(newEdge, eds));
+      
+      // If this is a shared flowchart, broadcast the new edge
+      if (id && id.startsWith('shared-') && activeFlowchartKey && yjsService.isInitialized() && yjsService.isP2PInitialized()) {
+        console.log('Broadcasting new edge to peers');
+        
+        yjsService.updateFlowchart({
+          edgeOperation: {
+            type: 'add',
+            edge: newEdge
+          }
+        });
       }
-    }
-  }, [setEdges, id, activeFlowchart, dispatch, activeFlowchartKey]);
+    },
+    [id, activeFlowchartKey, setEdges]
+  );
   
   // Handle selection changes
   const handleSelectionChange = useCallback(

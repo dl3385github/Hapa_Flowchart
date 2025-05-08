@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { HiOutlineArrowLeft, HiOutlineKey, HiOutlineRefresh } from 'react-icons/hi';
 import { setActiveFlowchartKey } from '../store/slices/collaborationSlice';
-import webRTCService from '../services/WebRTCService';
+import { p2pService } from '../services';
 import { RootState } from '../store';
 
 const JoinFlowchart: React.FC = () => {
@@ -12,21 +12,21 @@ const JoinFlowchart: React.FC = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   
-  const [hypercoreKey, setHypercoreKey] = useState('');
+  const [flowchartKey, setFlowchartKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'retrying' | 'failed'>('idle');
   const { signalingError, isConnected } = useSelector((state: RootState) => state.collaboration);
   
-  // Initialize WebRTC service
+  // Initialize P2P service
   useEffect(() => {
     const initService = async () => {
       try {
-        await webRTCService.initialize();
-        console.log('WebRTC service initialized successfully');
+        await p2pService.initialize();
+        console.log('P2P service initialized successfully');
       } catch (err) {
-        console.error('Failed to initialize WebRTC service:', err);
-        setError(t('webrtc_initialization_failed'));
+        console.error('Failed to initialize P2P service:', err);
+        setError(t('p2p_initialization_failed'));
       }
     };
     
@@ -35,7 +35,7 @@ const JoinFlowchart: React.FC = () => {
     // Cleanup on unmount
     return () => {
       if (isLoading) {
-        webRTCService.cleanup();
+        p2pService.cleanup();
       }
     };
   }, [t]);
@@ -59,18 +59,18 @@ const JoinFlowchart: React.FC = () => {
       setError(null);
       
       // Navigate if we have a key set
-      if (hypercoreKey) {
+      if (flowchartKey) {
         // Create a temporary ID for the flowchart
-        const tempId = `shared-${hypercoreKey.substring(0, 8)}`;
+        const tempId = `shared-${flowchartKey.substring(0, 8)}`;
         
         // Navigate to the editor page with a temporary ID
         navigate(`/editor/${tempId}`);
       }
     }
-  }, [isConnected, connectionStatus, hypercoreKey, navigate]);
+  }, [isConnected, connectionStatus, flowchartKey, navigate]);
   
   const handleJoin = async () => {
-    if (!hypercoreKey.trim()) {
+    if (!flowchartKey.trim()) {
       setError(t('please_enter_key'));
       return;
     }
@@ -80,14 +80,20 @@ const JoinFlowchart: React.FC = () => {
     setConnectionStatus('connecting');
     
     try {
-      console.log(`Attempting to join flowchart with key: ${hypercoreKey}`);
+      console.log(`Attempting to join flowchart with key: ${flowchartKey}`);
       
-      // Attempt to join the flowchart using WebRTC service
-      const success = await webRTCService.joinSharedFlowchart(hypercoreKey);
+      // Make sure P2P service is initialized
+      await p2pService.initialize();
+      
+      // First cleanup any existing connections
+      p2pService.cleanup();
+      
+      // Attempt to join the flowchart using P2P service
+      const success = await p2pService.joinSharedFlowchart(flowchartKey);
       
       if (success) {
         // Set the active flowchart key in collaboration state
-        dispatch(setActiveFlowchartKey(hypercoreKey));
+        dispatch(setActiveFlowchartKey(flowchartKey));
         
         // Navigation will happen in the useEffect when isConnected becomes true
         console.log('Join request successful, waiting for peer connections...');
@@ -114,22 +120,22 @@ const JoinFlowchart: React.FC = () => {
   };
   
   const handleRetry = async () => {
-    if (!hypercoreKey.trim()) return;
+    if (!flowchartKey.trim()) return;
     
     setConnectionStatus('retrying');
     setIsLoading(true);
     setError(null);
     
     // Clean up existing connections
-    webRTCService.cleanup();
+    p2pService.cleanup();
     
     // Reinitialize and try again
     try {
-      await webRTCService.initialize();
+      await p2pService.initialize();
       handleJoin();
     } catch (err) {
-      console.error('Failed to reinitialize WebRTC service:', err);
-      setError(t('webrtc_initialization_failed'));
+      console.error('Failed to reinitialize P2P service:', err);
+      setError(t('p2p_initialization_failed'));
       setConnectionStatus('failed');
       setIsLoading(false);
     }
@@ -155,7 +161,7 @@ const JoinFlowchart: React.FC = () => {
           </p>
           
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('hypercore_key')}
+            {t('flowchart_key')}
           </label>
           
           <div className="flex">
@@ -164,9 +170,9 @@ const JoinFlowchart: React.FC = () => {
             </div>
             <input
               type="text"
-              value={hypercoreKey}
-              onChange={(e) => setHypercoreKey(e.target.value)}
-              placeholder={t('paste_hypercore_key')}
+              value={flowchartKey}
+              onChange={(e) => setFlowchartKey(e.target.value)}
+              placeholder={t('paste_flowchart_key')}
               className="form-input flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
               disabled={isLoading}
             />
@@ -199,9 +205,9 @@ const JoinFlowchart: React.FC = () => {
           </button>
           <button
             onClick={handleJoin}
-            disabled={isLoading || !hypercoreKey.trim()}
+            disabled={isLoading || !flowchartKey.trim()}
             className={`px-4 py-2 rounded-md transition-colors ${
-              isLoading || !hypercoreKey.trim() 
+              isLoading || !flowchartKey.trim() 
                 ? 'bg-blue-400 text-white cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}

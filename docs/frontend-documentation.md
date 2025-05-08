@@ -55,7 +55,7 @@ src/
 ├── services/              # Service layer for API calls
 │   ├── taskManagerApi.js
 │   ├── hypercoreService.js
-│   ├── webrtcService.js
+│   ├── HyperswarmWebRTCService.js
 │   └── ...
 ├── utils/                 # Utility functions
 │   ├── flowchartUtils.js

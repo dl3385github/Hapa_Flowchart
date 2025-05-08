@@ -19,6 +19,7 @@ interface CollaborationState {
     } | null;
     cursor: { x: number; y: number } | null;
   };
+  stateVersion: number;
 }
 
 const initialState: CollaborationState = {
@@ -34,7 +35,8 @@ const initialState: CollaborationState = {
   localAwareness: {
     user: null,
     cursor: null
-  }
+  },
+  stateVersion: 0
 };
 
 export const collaborationSlice = createSlice({
@@ -120,6 +122,14 @@ export const collaborationSlice = createSlice({
         state.localAwareness.cursor = action.payload;
       }
     },
+
+    incrementStateVersion: (state) => {
+      state.stateVersion += 1;
+    },
+    
+    setStateVersion: (state, action: PayloadAction<number>) => {
+      state.stateVersion = action.payload;
+    }
   },
 });
 
@@ -136,6 +146,8 @@ export const {
   setCollaborativeDocument,
   setLocalAwareness,
   updateLocalCursor,
+  incrementStateVersion,
+  setStateVersion,
 } = collaborationSlice.actions;
 
 export default collaborationSlice.reducer; 

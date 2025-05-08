@@ -24,6 +24,7 @@ export default defineConfig({
         'buffer',
         'events',
         'net',
+        'tls',
         'os',
         'path',
         'fs',
@@ -102,6 +103,7 @@ export default defineConfig({
       define: {
         global: 'globalThis',
       },
+      // Needed for proper Hyperswarm handling in browser
       platform: 'browser',
       target: 'esnext',
       supported: {

@@ -13,13 +13,15 @@ import {
   HiOutlineClipboardList,
   HiOutlineMenuAlt2,
   HiOutlineUsers,
+  HiOutlineX,
 } from 'react-icons/hi';
 import { RootState } from '../../../store';
 import { toggleSidebar, togglePropertyPanel } from '../../../store/slices/uiSlice';
 import { applyChanges } from '../../../store/slices/flowchartsSlice';
 import { FlowChanges } from '../../../types';
 import CollaboratorsList from './CollaboratorsList';
-import webRTCService from '../../../services/WebRTCService';
+import ShareFlowchart from '../../collaboration/ShareFlowchart';
+import { p2pService } from '../../../services';
 
 interface FlowToolbarProps {
   flowchartId: string;
@@ -65,7 +67,7 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
   useEffect(() => {
     if (isSharedFlowchart && !flowchartKey) {
       // Check if we already have a key for this flowchart
-      const existingKey = webRTCService.getFlowchartKey(flowchartId);
+      const existingKey = p2pService.getFlowchartKey(flowchartId);
       if (existingKey) {
         setFlowchartKey(existingKey);
       }
@@ -117,16 +119,12 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     alert(`Flowchart "${flowchart?.name}" saved!`);
   };
   
-  const handleShare = async () => {
-    // Generate or retrieve the flowchart key
-    try {
-      const key = await webRTCService.createSharedFlowchart(flowchartId);
-      setFlowchartKey(key);
-      setSharingModalOpen(true);
-    } catch (error) {
-      console.error('Failed to generate sharing key:', error);
-      alert(t('failed_to_generate_key'));
-    }
+  const handleShare = () => {
+    setSharingModalOpen(true);
+  };
+  
+  const handleCloseModal = () => {
+    setSharingModalOpen(false);
   };
   
   const handleToggleCollaborators = () => {
@@ -138,13 +136,6 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
     console.log('Auto-layout flowchart', flowchartId);
     alert('Auto-layout applied!');
   };
-  
-  const handleCopyKey = () => {
-    if (flowchartKey) {
-      navigator.clipboard.writeText(flowchartKey);
-      alert(t('copied_to_clipboard'));
-    }
-  }
   
   return (
     <>
@@ -241,57 +232,32 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
         </div>
       </div>
       
+      {/* Collaborators List */}
+      {collaboratorsListOpen && (
+        <div className="absolute top-14 right-4 z-10">
+          <CollaboratorsList displayMode="inline" onClose={() => setCollaboratorsListOpen(false)} />
+        </div>
+      )}
+      
       {/* Sharing Modal */}
       {sharingModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-semibold mb-4">{t('share_flowchart')}</h2>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('hypercore_key')}
-              </label>
-              <div className="flex">
-                <input
-                  type="text"
-                  value={flowchartKey || ''}
-                  readOnly
-                  className="form-input rounded-r-none flex-1 truncate"
-                />
-                <button
-                  onClick={handleCopyKey}
-                  className="px-3 bg-gray-100 dark:bg-gray-700 border border-l-0 border-gray-300 dark:border-gray-600 rounded-r-md text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
-                >
-                  <HiOutlineDocumentDuplicate className="h-5 w-5" />
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {t('share_key_description')}
-              </p>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">{t('share_flowchart')}</h2>
+              <button 
+                onClick={handleCloseModal}
+                className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <HiOutlineX className="h-5 w-5" />
+              </button>
             </div>
             
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                {t('p2p_status')}
-              </label>
-              <div className="flex items-center">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'} mr-2`}></div>
-                <span className="text-sm text-gray-600 dark:text-gray-300">
-                  {isConnected ? t('ready_for_collaboration') : t('waiting_for_peers')}
-                </span>
-                <button
-                  onClick={() => {}}
-                  className="ml-auto p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  title={t('refresh')}
-                >
-                  <HiOutlineRefresh className="h-4 w-5" />
-                </button>
-              </div>
-            </div>
+            <ShareFlowchart flowchartId={flowchartId} />
             
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setSharingModalOpen(false)}
+            <div className="mt-6 flex justify-end">
+              <button 
+                onClick={handleCloseModal}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 {t('close')}
@@ -300,12 +266,6 @@ const FlowToolbar: React.FC<FlowToolbarProps> = ({ flowchartId }) => {
           </div>
         </div>
       )}
-      
-      {/* Collaborators List */}
-      <CollaboratorsList 
-        isOpen={collaboratorsListOpen} 
-        onClose={() => setCollaboratorsListOpen(false)} 
-      />
     </>
   );
 };
